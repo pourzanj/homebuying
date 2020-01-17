@@ -1,0 +1,61 @@
+bart_station,to_or_from,time_of_day,min_drive_time,max_drive_time
+West Oakland,from,4,55,75
+West Oakland,from,5,55,75
+West Oakland,from,6,55,75
+West Oakland,from,7,55,75
+West Oakland,from,8,55,75
+West Oakland,from,9,55,75
+West Oakland,to,15,60,80
+West Oakland,to,16,60,85
+West Oakland,to,17,60,80
+West Oakland,to,18,60,75
+West Oakland,to,19,60,75
+West Oakland,to,20,55,70
+12th Street Oakland,from,4,60,75
+12th Street Oakland,from,5,55,75
+12th Street Oakland,from,6,55,75
+12th Street Oakland,from,7,60,85
+12th Street Oakland,from,8,60,85
+12th Street Oakland,from,9,60,85
+12th Street Oakland,to,15,65,90
+12th Street Oakland,to,16,65,100
+12th Street Oakland,to,17,65,90
+12th Street Oakland,to,18,60,80
+12th Street Oakland,to,19,60,75
+12th Street Oakland,to,20,60,75
+19th Street Oakland,from,4,60,80
+19th Street Oakland,from,5,60,80
+19th Street Oakland,from,6,60,80
+19th Street Oakland,from,7,60,85
+19th Street Oakland,from,8,60,85
+19th Street Oakland,from,9,60,85
+19th Street Oakland,to,15,65,100
+19th Street Oakland,to,16,70,100
+19th Street Oakland,to,17,70,100
+19th Street Oakland,to,18,65,85
+19th Street Oakland,to,19,60,80
+19th Street Oakland,to,20,60,75
+MacArthur,from,4,55,75
+MacArthur,from,5,55,75
+MacArthur,from,6,55,75
+MacArthur,from,7,55,75
+MacArthur,from,8,60,80
+MacArthur,from,9,60,80
+MacArthur,to,15,60,85
+MacArthur,to,16,60,85
+MacArthur,to,17,60,85
+MacArthur,to,18,60,75
+MacArthur,to,19,55,75
+MacArthur,to,20,55,75
+,from,4,,
+,from,5,,
+,from,6,,
+,from,7,,
+,from,8,,
+,from,9,,
+,to,15,,
+,to,16,,
+,to,17,,
+,to,18,,
+,to,19,,
+,to,20,,
