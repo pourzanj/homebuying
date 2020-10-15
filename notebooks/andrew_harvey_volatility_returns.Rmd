@@ -1,0 +1,342 @@
+---
+title: 'Andrew Harvey: Modeling Joint Interaction Between Volatility and Returns'
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+This is one of the 
+
+1. Dynamic conditional score (DCS) as a generalization of squared residuals
+2. Leverage modeled by sign variable in EGARCH
+3. Two-component volatility to account for long run volatility memory
+
+```{r load}
+library(tidyverse)
+library(tidyquant)
+library(rstan)
+library(sgt)
+```
+
+# Models
+
+## Baseline
+
+$$
+\begin{aligned}
+y_t &\sim SGT(\mu, \exp \lambda_{t+1|t}, l, p, q)\\
+\lambda_{t+1|t} &= \omega + \phi \lambda_{t|t-1} + h(y_t)\\
+h(y_t) &= \kappa_2 y_t^2 + \kappa_1 y_t \\
+\end{aligned}
+$$
+
+
+Note that for the SGT we set mean.cent = FALSE and var.adj = FALSE because it's
+easier computationally.
+
+$$
+\begin{aligned}
+\ln f_{SGT}(y_t) &=
+\ln p - \ln 2 \sigma - \frac{1}{p} \ln q - \ln B(1/p, q)
+- \left( \frac{1}{p} + q \right) \ln \left( \frac{|y_t - \mu|^p}{q\sigma^p (\lambda\, \mathrm{sign}(y_t - \mu) + 1)^p} + 1 \right)
+\end{aligned}
+$$
+
+$$
+\begin{aligned}
+\frac{\partial}{\partial \sigma} \ln f_{SGT}(y_t) &=
+\ln p - \ln 2 \sigma - \frac{1}{p} \ln q - \ln B(1/p, q)
+- \left( \frac{1}{p} + q \right) \ln \left( \frac{|y_t - \mu|^p}{q\sigma^p (\lambda\, \mathrm{sign}(y_t - \mu) + 1)^p} + 1 \right)
+\end{aligned}
+$$
+
+
+## Two Component Volatility
+
+# Data
+
+```{r wrangle_data}
+spx <-
+  tq_get("^GSPC",
+         get = "stock.prices",
+         from = "2019-10-14",
+         to = "2020-10-14") %>%
+  # tq_get("^GSPC",
+  #        get = "stock.prices",
+  #        from = "2008-03-14",
+  #        to = "2010-01-14") %>%
+  mutate(year = year(date), week = week(date)) %>%
+  # group_by(week, year) %>%
+  # filter(date == min(date)) %>%
+  # ungroup() %>%
+  mutate(pct_return = 100 * (close - lag(close)) / lag(close)) %>%
+  na.omit()
+```
+
+```{r plot_returns_over_time}
+spx %>%
+  select(date, close, pct_return) %>%
+  pivot_longer(-date) %>%
+  ggplot(aes(date, value)) +
+  geom_line() +
+  geom_point() +
+  facet_grid(name ~ ., scales = "free")
+```
+
+```{r plot_returns_hist}
+spx %>%
+  ggplot(aes(pct_return)) +
+  geom_histogram(binwidth = 0.5)
+```
+
+
+# Fits
+
+## Baseline
+
+```{r}
+fit_egarch_sgt <-
+  stan(file = "stan/egarch_sgt.stan",
+       data = list(T = nrow(spx), y = spx$pct_return,
+                   m_p = 1, s_p = 100,
+                   m_q = 2, s_q = 100),
+       control = list(adapt_delta = 0.9),
+       chains = 1, iter = 1e3, refresh = 20)
+
+print(fit_egarch_sgt, pars = c("omega", "phi", "k1", "k2", "lambda1",
+                               "mu", "l", "p", "q"))
+```
+
+```{r}
+s <- extract(fit_egarch_sgt)
+
+link <- function(x) exp(x / 20)
+
+get_sgt_quantile <- function(q, num_samples = 500) {
+ 1:num_samples %>%
+  map(function(i)
+    qsgt(q,
+         s$mu[i], link(s$lambda[i,]), s$l[i], s$p[i], s$q[i],
+         mean.cent = FALSE, var.adj = FALSE)) %>%
+  bind_cols() %>%
+  as.matrix() %>%
+  apply(1, mean) 
+}
+
+pred_quantiles <-
+  tibble(date = spx$date, pct_return = spx$pct_return) %>%
+  mutate(q1 = get_sgt_quantile(0.01),
+         q5 = get_sgt_quantile(0.05),
+         q25 = get_sgt_quantile(0.25),
+         q75 = get_sgt_quantile(0.75),
+         q95 = get_sgt_quantile(0.95),
+         q99 = get_sgt_quantile(0.99))
+
+pred_quantiles %>%
+  ggplot(aes(date, pct_return)) +
+  geom_ribbon(aes(ymin = q1, ymax = q99), alpha = 0.1) +
+  geom_ribbon(aes(ymin = q5, ymax = q95), alpha = 0.1) +
+  geom_ribbon(aes(ymin = q25, ymax = q75), alpha = 0.1) +
+  geom_point() +
+  geom_line() +
+  labs(title = "Returns",
+              subtitle = "50, 90, and 98 Predicted Uncertainty Intervals",
+              caption = "Model: EGARCH")
+
+# Get overall callibration of uncertainty intervals
+pred_quantiles %>%
+  mutate(in_98_int = q1 < pct_return & pct_return < q99,
+         in_90_int = q5 < pct_return & pct_return < q95,
+         in_50_int = q25 < pct_return & pct_return < q75) %>%
+  summarize(in_98_int = mean(in_98_int),
+            in_90_int = mean(in_90_int),
+            in_50_int = mean(in_50_int))
+
+# Plot over time when an observation falls out of its predicted interval
+pred_quantiles %>%
+  mutate(in_98_int = q1 < pct_return & pct_return < q99,
+         in_90_int = q5 < pct_return & pct_return < q95,
+         in_50_int = q25 < pct_return & pct_return < q75) %>%
+  select(date, pct_return, in_98_int, in_90_int, in_50_int) %>%
+  pivot_longer(-date) %>%
+  ggplot(aes(date, value)) +
+  geom_line() +
+  geom_point() +
+  facet_grid(name ~ ., scales = "free") +
+  scale_x_date(date_breaks = "month", date_labels="%b %Y")
+```
+
+```{r}
+# Look at 90 interval misses and why they cluster
+pred_quantiles %>%
+  mutate(in_90_int = q5 < pct_return & pct_return < q95) %>%
+  ggplot(aes(date, pct_return)) +
+  geom_ribbon(aes(ymin = q5, ymax = q95), alpha = 0.1) +
+  geom_point(aes(color = in_90_int)) +
+  geom_line() +
+  scale_x_date(date_breaks = "month", date_labels="%b %Y")
+
+# Plot quadratic response
+tibble(sample_id = 1:500, omega = s$omega, k1 = s$k1, k2 = s$k2) %>%
+  sample_n(20) %>%
+  crossing(pct_return = seq(-12, 12, by = 1)) %>%
+  mutate(h = omega + k1*pct_return + k2*pct_return^2) %>%
+  mutate(exp_h = link(h)) %>%
+  select(sample_id, pct_return, h, exp_h) %>%
+  pivot_longer(c(-sample_id, -pct_return)) %>%
+  ggplot(aes(pct_return, value, group = sample_id)) +
+  geom_line() +
+  facet_grid(name ~ ., scales = "free")
+```
+
+```{r generate_process}
+generate_egarch_sgt <- function(i, date) {
+  
+  # Unpack parameters
+  omega <- s$omega[i]
+  phi <- s$phi[i]
+  k1 <- s$k1[i]
+  k2 <- s$k2[i]
+  lambda1 <- s$lambda1[i]
+  mu <- s$mu[i]
+  l <- s$l[i]
+  p <- s$p[i]
+  q <- s$q[i]
+  
+  # Initialize output vectors
+  N <- length(date)
+  h <- rep(0.0, N)
+  lambda <- rep(0.0, N)
+  y <- rep(0.0, N)
+  
+  h[1] <- 0.0
+  lambda[1] <- lambda1
+  y[1] <-
+    rsgt(1,
+         mu, exp(lambda[1]), l, p, q,
+         mean.cent = FALSE, var.adj = FALSE)
+    
+  for(t in 2:N) {
+    h[t] <- k1*y[t-1] + k2*y[t-1]^2
+    lambda[t] <- omega + phi*lambda[t-1] + h[t]
+    y[t] <-
+      rsgt(1,
+           mu, exp(lambda[t]), l, p, q,
+           mean.cent = FALSE, var.adj = FALSE)
+  }
+  
+  tibble(sample_id = rep(i, N), date, h, lambda, y) %>%
+    mutate(sim_or_real = "sim")
+}
+
+sim_traj <-
+  1:500 %>%
+  sample(4) %>%
+  map_dfr(generate_egarch_sgt, date = spx$date)
+
+real_traj <-
+  tibble(sample_id = NA, date = spx$date, y = spx$pct_return, sim_or_real = "real")
+
+bind_rows(sim_traj, real_traj) %>%
+  ggplot(aes(date, y, color = sim_or_real)) +
+  geom_point() +
+  geom_line() +
+  facet_grid(sample_id ~ .)
+```
+
+
+
+
+
+```{r plot_cdf}
+get_sgt_cdf <- function(num_samples = 500) {
+ 1:num_samples %>%
+  map(function(i)
+    psgt(spx$pct_return,
+         s$mu[i], exp(s$lambda[i,]), s$l[i], s$p[i], s$q[i],
+         mean.cent = FALSE, var.adj = FALSE)) %>%
+  bind_cols() %>%
+  as.matrix() %>%
+  apply(1, mean) 
+}
+
+tibble(date = spx$date, pct_return = spx$pct_return) %>%
+  mutate(cdf = get_sgt_cdf()) %>%
+  ggplot(aes(date, cdf)) +
+  geom_line() +
+  geom_point()
+```
+
+
+
+
+
+
+
+
+```{r calm_vs_tumultuous_great_recession}
+# look at calm vs tumultuous in great recession to see if tails behavior
+# is different. answer is not really. q might be slightly lower during tumultuos
+# time.
+calm_vs_tumultuous <-
+  tq_get("^GSPC",
+         get = "stock.prices",
+         from = "2007-06-14",
+         to = "2009-01-14") %>%
+  mutate(year = year(date), week = week(date)) %>%
+  # group_by(week, year) %>%
+  # filter(date == min(date)) %>%
+  # ungroup() %>%
+  mutate(pct_return = 100 * (close - lag(close)) / lag(close)) %>%
+  na.omit() %>%
+  mutate(calm = date < as.Date("2008-09-15"))
+
+calm <- calm_vs_tumultuous %>% filter(calm)
+tumultuous <- calm_vs_tumultuous %>% filter(!calm)
+
+# fit each separately
+fit_sgt_calm <-
+  stan(file = "stan/sgt.stan",
+       data = list(N = nrow(calm), y = calm$pct_return,
+                   m_p = 1, s_p = 100,
+                   m_q = 2, s_q = 100),
+       chains = 1, iter = 1e3, refresh = 100)
+
+
+fit_sgt_tumultuous <-
+  stan(file = "stan/sgt.stan",
+       data = list(N = nrow(tumultuous), y = tumultuous$pct_return,
+                   m_p = 1, s_p = 100,
+                   m_q = 2, s_q = 100),
+       chains = 1, iter = 1e3, refresh = 100)
+
+# Plot
+s <- extract(fit_sgt_calm)
+
+grid_calm <-
+  tibble(mu = s$mu, sigma = s$s, lambda = s$l, p = s$p, q = s$q) %>%
+  sample_n(20) %>%
+  crossing(x = seq(-20, 20, by = 0.2)) %>%
+  mutate(density = pmap_dbl(., dsgt, mean.cent = FALSE, var.adj = FALSE)) %>%
+  inner_join(mutate(distinct(., mu, sigma, lambda, p, q), sample_id = row_number())) %>%
+  mutate(calm = TRUE)
+
+s <- extract(fit_sgt_tumultuous)
+
+grid_tumultuous <-
+  tibble(mu = s$mu, sigma = s$s, lambda = s$l, p = s$p, q = s$q) %>%
+  sample_n(20) %>%
+  crossing(x = seq(-20, 20, by = 0.2)) %>%
+  mutate(density = pmap_dbl(., dsgt, mean.cent = FALSE, var.adj = FALSE)) %>%
+  inner_join(mutate(distinct(., mu, sigma, lambda, p, q), sample_id = row_number())) %>%
+  mutate(calm = FALSE)
+
+grid <- bind_rows(grid_calm, grid_tumultuous)
+
+calm_vs_tumultuous %>%
+  ggplot(aes(pct_return)) +
+  geom_histogram(aes(y = ..density..), binwidth = 1.0) +
+  geom_line(aes(x, density, group = sample_id), alpha = 0.1, data = grid) +
+  facet_grid(calm ~ ., scales = "free")
+```
+
