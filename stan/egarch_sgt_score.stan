@@ -60,14 +60,6 @@ functions {
     real d_star;
     real df_dsigma;
   
-    print("y: ", y);
-    print("mu: ", mu);
-    print("p: ", p);
-    
-    print("num: ", num);
-    print("den: ", den);
-    print("star: ", star);
-  
     // Get d_star
     num = p * fabs(y - mu)^p;
     den = q*sigma^(p+1) * (l*sign(y-mu) + 1)^p;
@@ -77,7 +69,6 @@ functions {
   
     // Return final
     df_dsigma = -(1/sigma) - (1/p + q) * (1 / (star+1)) * d_star;
-    print("df_dsigma: ", df_dsigma);
     return(df_dsigma * sigma);
   }
 }
