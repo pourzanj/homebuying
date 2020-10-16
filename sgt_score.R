@@ -6,30 +6,30 @@ ln_fsgt <- function(y, mu, sigma, lambda, q, p) {
 }
 
 # Make sure log density matches R implementation
-ln_fsgt(1, mu = 0.23, sigma = 0.5, lambda = -0.1, q = 5, p = 2)
-dsgt(1, mu = 0.23, sigma = 0.5, lambda = -0.1, q = 5, p = 2, mean.cent = FALSE, var.adj = FALSE, log = TRUE)
+ln_fsgt(1, mu = 0.23, sigma = 0.5, lambda = -0.1, p = 2, q = 5)
+dsgt(1, mu = 0.23, sigma = 0.5, lambda = -0.1, p = 2, q = 5, mean.cent = FALSE, var.adj = FALSE, log = TRUE)
 
 # Check that star derivative is correct
-star <- function(y, mu, sigma, lambda, q, p) {
+star <- function(y, mu, sigma, lambda, p, q) {
   num <- abs(y - mu)^p
   den <- q*sigma^p * (lambda*sign(y-mu) + 1)^p
   num / den
 }
 
-d_star <- function(y, mu, sigma, lambda, q, p) {
+d_star <- function(y, mu, sigma, lambda, p, q) {
   num <- p * abs(y - mu)^p
   den <- q*sigma^(p+1) * (lambda*sign(y-mu) + 1)^p
   -num / den
 }
 
-d_star(1, mu = 0.23, sigma = 0.5 + eps, lambda = -0.1, q = 5, p = 2)
+d_star(1, mu = 0.23, sigma = 0.5 + eps, lambda = -0.1, p = 2, q = 5)
 
 eps <- 1e-5
-(star(1, mu = 0.23, sigma = 0.5 + eps, lambda = -0.1, q = 5, p = 2) -
-    star(1, mu = 0.23, sigma = 0.5, lambda = -0.1, q = 5, p = 2)) / eps
+(star(1, mu = 0.23, sigma = 0.5 + eps, lambda = -0.1, p = 2, q = 5) -
+    star(1, mu = 0.23, sigma = 0.5, lambda = -0.1, p = 2, q = 5)) / eps
 
 # Check rest of function
-d_ln_fsgt <- function(y, mu, sigma, lambda, q, p) {
+d_ln_fsgt <- function(y, mu, sigma, lambda, p, q) {
   # Get star
   num <- abs(y - mu)^p
   den <- q*sigma^p * (lambda*sign(y-mu) + 1)^p
@@ -44,7 +44,7 @@ d_ln_fsgt <- function(y, mu, sigma, lambda, q, p) {
   -(1/sigma) - (1/p + q) * (1 / (star+1)) * d_star
 }
 
-d_ln_fsgt(1, mu = 0.23, sigma = 0.5 + eps, lambda = -0.1, q = 5, p = 2)
+d_ln_fsgt(1, mu = 0.23, sigma = 0.5 + eps, lambda = -0.1, p = 2, q = 5)
 
 eps <- 1e-5
 (ln_fsgt(1, mu = 0.23, sigma = 0.5 + eps, lambda = -0.1, q = 5, p = 2) -

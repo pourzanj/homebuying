@@ -42,6 +42,44 @@ functions {
     
     return out;
   }
+  
+  real sign(real x) {
+    if(x < 0.0) {
+      return -1.0;
+    } else {
+      return 1.0;
+    }
+  }
+  
+  real u(real y, real mu, real sigma, real l, real p, real q) {
+    // Get star
+    real num = fabs(y - mu)^p;
+    real den = q*sigma^p * (l*sign(y-mu) + 1)^p;
+    real star = num / den;
+    
+    real d_star;
+    real df_dsigma;
+  
+    print("y: ", y);
+    print("mu: ", mu);
+    print("p: ", p);
+    
+    print("num: ", num);
+    print("den: ", den);
+    print("star: ", star);
+  
+    // Get d_star
+    num = p * fabs(y - mu)^p;
+    den = q*sigma^(p+1) * (l*sign(y-mu) + 1)^p;
+    d_star = -num / den;
+    
+    print("d_star: ", d_star);
+  
+    // Return final
+    df_dsigma = -(1/sigma) - (1/p + q) * (1 / (star+1)) * d_star;
+    print("df_dsigma: ", df_dsigma);
+    return(df_dsigma * sigma);
+  }
 }
 data {
   int<lower=0> T;
@@ -55,11 +93,8 @@ parameters {
   // Scale parameters
   real omega;
   real phi;
-  // real iota;
   real k1;
   real k2;
-  // real k3;
-  // real k4;
 
   // Scale of very first observation
   real lambda1;
@@ -71,21 +106,22 @@ parameters {
   real<lower=2> q;
 }
 transformed parameters {
+  vector[T] u_t;
   vector[T] h;
   vector[T] lambda;
   
+  u_t[1] = 0;
   h[1] = 0;
   lambda[1] = lambda1;
   
   for (t in 2:T) {
-    // h[t] = k1*y[t-1] + k2*y[t-1]^2 + k3*y[t-1]^3 + k4*y[t-1]^4;
-    h[t] = k1*y[t-1] + k2*y[t-1]^2;
+    u_t[t] = u(y[t-1], mu, exp(lambda[t-1]), l, p, q);
+    h[t] = k1*u_t[t] + k2*sign(-y[t-1])*(u_t[t]+1);
     lambda[t] = omega + phi*lambda[t-1] + h[t];
   }
 }
 model {
   // prior
-  // k3 ~ normal(0, 1e-1);
   p ~ normal(m_p, s_p);
   q ~ normal(m_q, s_q);
   

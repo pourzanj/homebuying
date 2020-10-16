@@ -95,22 +95,22 @@ spx %>%
 ## Baseline
 
 ```{r}
-fit_egarch_sgt <-
-  stan(file = "stan/egarch_sgt.stan",
+fit_egarch_sgt_score <-
+  stan(file = "stan/egarch_sgt_score.stan",
        data = list(T = nrow(spx), y = spx$pct_return,
                    m_p = 1, s_p = 100,
                    m_q = 2, s_q = 100),
        control = list(adapt_delta = 0.9),
        chains = 1, iter = 1e3, refresh = 20)
 
-print(fit_egarch_sgt, pars = c("omega", "phi", "k1", "k2", "lambda1",
+print(fit_egarch_sgt_score, pars = c("omega", "phi", "k1", "k2", "lambda1",
                                "mu", "l", "p", "q"))
 ```
 
 ```{r}
-s <- extract(fit_egarch_sgt)
+s <- extract(fit_egarch_sgt_score)
 
-link <- function(x) exp(x / 20)
+link <- function(x) exp(x)
 
 get_sgt_quantile <- function(q, num_samples = 500) {
  1:num_samples %>%
@@ -177,20 +177,26 @@ pred_quantiles %>%
   scale_x_date(date_breaks = "month", date_labels="%b %Y")
 
 # Plot quadratic response
-tibble(sample_id = 1:500, omega = s$omega, k1 = s$k1, k2 = s$k2) %>%
-  sample_n(20) %>%
-  crossing(pct_return = seq(-12, 12, by = 1)) %>%
-  mutate(h = omega + k1*pct_return + k2*pct_return^2) %>%
-  mutate(exp_h = link(h)) %>%
-  select(sample_id, pct_return, h, exp_h) %>%
-  pivot_longer(c(-sample_id, -pct_return)) %>%
-  ggplot(aes(pct_return, value, group = sample_id)) +
-  geom_line() +
-  facet_grid(name ~ ., scales = "free")
+# No longer applicable
+# tibble(sample_id = 1:500, omega = s$omega, k1 = s$k1, k2 = s$k2) %>%
+#   sample_n(20) %>%
+#   crossing(pct_return = seq(-12, 12, by = 1)) %>%
+#   mutate(h = omega + k1*pct_return + k2*pct_return^2) %>%
+#   mutate(exp_h = link(h)) %>%
+#   select(sample_id, pct_return, h, exp_h) %>%
+#   pivot_longer(c(-sample_id, -pct_return)) %>%
+#   ggplot(aes(pct_return, value, group = sample_id)) +
+#   geom_line() +
+#   facet_grid(name ~ ., scales = "free")
 ```
 
 ```{r generate_process}
-generate_egarch_sgt <- function(i, date) {
+u <- function(y, mu, sigma, lambda, p, q) {
+  df_dsigma <- d_ln_fsgt(y, mu, sigma, lambda, p, q)
+  df_dsigma * sigma
+}
+
+generate_egarch_sgt_score <- function(i, date) {
   
   # Unpack parameters
   omega <- s$omega[i]
@@ -205,6 +211,7 @@ generate_egarch_sgt <- function(i, date) {
   
   # Initialize output vectors
   N <- length(date)
+  u_t1 <- rep(0.0, N)
   h <- rep(0.0, N)
   lambda <- rep(0.0, N)
   y <- rep(0.0, N)
@@ -217,7 +224,8 @@ generate_egarch_sgt <- function(i, date) {
          mean.cent = FALSE, var.adj = FALSE)
     
   for(t in 2:N) {
-    h[t] <- k1*y[t-1] + k2*y[t-1]^2
+    u_t1[t] <- u(y[t-1], mu, exp(lambda[t-1]), l, p, q)
+    h[t] <- k1*u_t1[t] + k2*sign(-y[t-1])*(u_t1[t]+1)
     lambda[t] <- omega + phi*lambda[t-1] + h[t]
     y[t] <-
       rsgt(1,
@@ -225,17 +233,17 @@ generate_egarch_sgt <- function(i, date) {
            mean.cent = FALSE, var.adj = FALSE)
   }
   
-  tibble(sample_id = rep(i, N), date, h, lambda, y) %>%
+  tibble(sample_id = rep(i, N), date, u_t1 = u_t1, h, lambda, y) %>%
     mutate(sim_or_real = "sim")
 }
+
+real_traj <-
+  tibble(sample_id = NA, date = spx$date, y = spx$pct_return, sim_or_real = "real")
 
 sim_traj <-
   1:500 %>%
   sample(4) %>%
-  map_dfr(generate_egarch_sgt, date = spx$date)
-
-real_traj <-
-  tibble(sample_id = NA, date = spx$date, y = spx$pct_return, sim_or_real = "real")
+  map_dfr(generate_egarch_sgt_score, date = spx$date)
 
 bind_rows(sim_traj, real_traj) %>%
   ggplot(aes(date, y, color = sim_or_real)) +
@@ -243,6 +251,9 @@ bind_rows(sim_traj, real_traj) %>%
   geom_line() +
   facet_grid(sample_id ~ .)
 ```
+
+
+
 
 
 

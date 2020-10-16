@@ -55,11 +55,8 @@ parameters {
   // Scale parameters
   real omega;
   real phi;
-  // real iota;
   real k1;
   real k2;
-  // real k3;
-  // real k4;
 
   // Scale of very first observation
   real lambda1;
@@ -78,14 +75,12 @@ transformed parameters {
   lambda[1] = lambda1;
   
   for (t in 2:T) {
-    // h[t] = k1*y[t-1] + k2*y[t-1]^2 + k3*y[t-1]^3 + k4*y[t-1]^4;
     h[t] = k1*y[t-1] + k2*y[t-1]^2;
     lambda[t] = omega + phi*lambda[t-1] + h[t];
   }
 }
 model {
   // prior
-  // k3 ~ normal(0, 1e-1);
   p ~ normal(m_p, s_p);
   q ~ normal(m_q, s_q);
   
