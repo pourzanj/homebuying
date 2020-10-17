@@ -65,8 +65,6 @@ functions {
     den = q*sigma^(p+1) * (l*sign(y-mu) + 1)^p;
     d_star = -num / den;
     
-    print("d_star: ", d_star);
-  
     // Return final
     df_dsigma = -(1/sigma) - (1/p + q) * (1 / (star+1)) * d_star;
     return(df_dsigma * sigma);
@@ -76,6 +74,14 @@ data {
   int<lower=0> T;
   vector[T] y;
   
+  real m_omega; real<lower=0> s_omega;
+  real a_phi; real<lower=0> b_phi;
+  real m_k1; real<lower=0> s_k1;
+  real m_k2; real<lower=0> s_k2;
+  
+  real m_lambda1; real<lower=0> s_lambda1;
+  
+  real m_mu; real<lower=0> s_mu;
   real m_p; real<lower=0> s_p;
   real m_q; real<lower=0> s_q;
 }
@@ -83,7 +89,7 @@ parameters {
   
   // Scale parameters
   real omega;
-  real phi;
+  real<lower=0, upper=1> phi;
   real k1;
   real k2;
 
@@ -97,25 +103,42 @@ parameters {
   real<lower=2> q;
 }
 transformed parameters {
+  // vector[T] Ey;
   vector[T] u_t;
   vector[T] h;
   vector[T] lambda;
   
+  // Ey[1] = 0;
   u_t[1] = 0;
   h[1] = 0;
   lambda[1] = lambda1;
   
   for (t in 2:T) {
+    // Expected value of return
+    // Ey[t] = mu + (2*exp(lambda[t-1])) * l * q^(1/p) * exp(lbeta(2/p, q-1/p)) / exp(lbeta(1/p, q));
     u_t[t] = u(y[t-1], mu, exp(lambda[t-1]), l, p, q);
-    h[t] = k1*u_t[t] + k2*sign(-y[t-1])*(u_t[t]+1);
-    lambda[t] = omega + phi*lambda[t-1] + h[t];
+    // h[t] = k1*u_t[t] + k2*sign(-(y[t-1]-Ey[t]))*(u_t[t]+1);
+    h[t] = k1*u_t[t] + k2*sign(-(y[t-1]))*(u_t[t]+1);
+    lambda[t] = omega*(1-phi) + phi*lambda[t-1] + h[t];
   }
 }
 model {
   // prior
+  omega ~ normal(m_omega, s_omega);
+  phi ~ beta(a_phi, b_phi);
+  k1 ~ normal(m_k1, s_k1);
+  k2 ~ normal(m_k2, s_k2);
+  
+  lambda1 ~ normal(m_lambda1, s_lambda1);
+  
+  mu ~ normal(m_mu, s_mu);
   p ~ normal(m_p, s_p);
   q ~ normal(m_q, s_q);
   
   // likelihood
   y ~ sgt(mu, exp(lambda), l, p, q);
+}
+generated quantities {
+  // measure of heavy-tailness
+  real pq = p*q;
 }
