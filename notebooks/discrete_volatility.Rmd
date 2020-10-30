@@ -1,0 +1,95 @@
+---
+title: "Discrete Volatility"
+output: html_notebook
+---
+Testing the theory that maybe volatility does not evolve like a random walk but
+rather is constant with discontinuous jumps.
+
+```{r}
+spx_weekly <-
+  tq_get("^GSPC",
+         get = "stock.prices",
+         from = "2010-09-01",
+         to = "2020-09-01") %>%
+  mutate(year = year(date), week = epiweek(date)) %>%
+  group_by(week, year) %>%
+  mutate(weekday = weekdays(date)) %>%
+  filter(weekday == "Friday" | weekday == "Thursday") %>%
+  filter(date == max(date)) %>%
+  ungroup() %>%
+  mutate(pct_return = 100*(close - lag(close)) / lag(close)) %>%
+  select(date, close, pct_return) %>%
+  na.omit()
+
+p <-
+  spx_weekly %>%
+  pivot_longer(-date) %>%
+  ggplot(aes(date, value)) +
+  geom_point() +
+  facet_grid(name ~ ., scales = "free") +
+  scale_x_date(date_breaks = "years", date_labels="%Y")
+
+ggplotly(p, dynamicTicks = TRUE) %>%
+  rangeslider() %>%
+  layout(hovermode = "x")
+```
+
+```{r}
+
+change_dates <-
+c("2011-07-01", "2011-12-23", "2012-04-13",
+  "2012-06-15", "2012-09-28", "2013-01-11",
+  "2013-03-08", "2014-10-10", "2015-05-01",
+  "2015-07-17", "2016-02-19", "2016-12-16",
+  "2018-01-05", "2018-04-13", "2018-10-12",
+  "2019-01-04", "2019-09-20",
+  "2020-01-24", "2020-02-28", "2020-04-17") %>%
+  ymd() %>%
+  as_tibble() %>%
+  set_names("date") %>%
+  mutate(change_date = TRUE)
+
+spx_weekly_change_date <-
+  spx_weekly %>%
+  left_join(change_dates) %>%
+  mutate(change_date = ifelse(is.na(change_date), FALSE, TRUE)) %>%
+  mutate(group = cumsum(change_date))
+
+p2 <-
+  spx_weekly_change_date %>%
+  mutate(pct_return = round(pct_return, 2)) %>%
+  ggplot(aes(date, pct_return, color = as.factor(group))) +
+  geom_point() +
+  geom_vline(aes(xintercept = date), data = change_dates)
+
+ggplotly(p2, dynamicTicks = TRUE) %>%
+  rangeslider() %>%
+  layout(hovermode = "x")
+```
+
+```{r}
+library(extraDistr)
+library(metRology)
+
+quantiles <-
+  spx_weekly_change_date %>%
+  group_by(group) %>%
+  summarize(ybar = mean(pct_return),
+            n = n(),
+            s2 = 1/(n-1) * sum((pct_return - ybar)^2)) %>%
+  mutate(mu5 = qt.scaled(0.05, n-1, ybar, sqrt(s2/n)), mu95 = qt.scaled(0.95, n-1, ybar, sqrt(s2/n))+ybar,
+         sigma5 = sqrt(qinvchisq(0.05, n-1, sqrt(s2))), sigma95 = sqrt(qinvchisq(0.95, n-1, sqrt(s2))))
+
+quantiles %>%
+  ggplot() +
+  geom_errorbar(aes(group, ymin = mu5, ymax = mu95))
+
+spx_weekly_change_date %>% select(date, group) %>% inner_join(quantiles) %>% ggplot(aes(date, fill = as.factor(group))) + geom_ribbon(aes(ymin = mu5, ymax = mu95))
+
+quantiles %>%
+  ggplot() +
+  geom_errorbar(aes(group, ymin = sqrt(sigma5), ymax = sqrt(sigma95)))
+
+spx_weekly_change_date %>% select(date, group) %>% inner_join(quantiles) %>% ggplot(aes(date, fill = as.factor(group))) + geom_ribbon(aes(ymin = sigma5, ymax = sigma95))
+```
+
