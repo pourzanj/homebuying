@@ -62,9 +62,11 @@ p2 <-
   geom_point() +
   geom_vline(aes(xintercept = date), data = change_dates)
 
-ggplotly(p2, dynamicTicks = TRUE) %>%
-  rangeslider() %>%
-  layout(hovermode = "x")
+p2
+
+# ggplotly(p2, dynamicTicks = TRUE) %>%
+#   rangeslider() %>%
+#   layout(hovermode = "x")
 ```
 
 ```{r}
@@ -80,16 +82,51 @@ quantiles <-
   mutate(mu5 = qt.scaled(0.05, n-1, ybar, sqrt(s2/n)), mu95 = qt.scaled(0.95, n-1, ybar, sqrt(s2/n))+ybar,
          sigma5 = sqrt(qinvchisq(0.05, n-1, sqrt(s2))), sigma95 = sqrt(qinvchisq(0.95, n-1, sqrt(s2))))
 
-quantiles %>%
-  ggplot() +
-  geom_errorbar(aes(group, ymin = mu5, ymax = mu95))
 
 spx_weekly_change_date %>% select(date, group) %>% inner_join(quantiles) %>% ggplot(aes(date, fill = as.factor(group))) + geom_ribbon(aes(ymin = mu5, ymax = mu95))
 
-quantiles %>%
-  ggplot() +
-  geom_errorbar(aes(group, ymin = sqrt(sigma5), ymax = sqrt(sigma95)))
 
-spx_weekly_change_date %>% select(date, group) %>% inner_join(quantiles) %>% ggplot(aes(date, fill = as.factor(group))) + geom_ribbon(aes(ymin = sigma5, ymax = sigma95))
+spx_weekly_change_date %>%
+  select(date, group) %>%
+  inner_join(quantiles) %>%
+  ggplot(aes(date, fill = as.factor(group))) +
+  geom_ribbon(aes(ymin = sigma5, ymax = sigma95))
+
+spx_weekly_change_date %>%
+  select(date, group) %>%
+  inner_join(quantiles) %>%
+  mutate(log_sigma5 = log(sigma5), log_sigma95 = log(sigma95)) %>%
+  ggplot(aes(date, fill = as.factor(group))) +
+  geom_ribbon(aes(ymin = log_sigma5, ymax = log_sigma95))
+```
+
+```{r}
+p0 <- 1e-4
+N <- nrow(spx_weekly)
+tau0 <- N * p0/(1-p0)
+tau <- tau0 * abs(rcauchy(1))
+sim_horseshoe <-
+  tibble(date = spx_weekly$date, lambda = abs(rcauchy(N))) %>%
+  mutate(tau_lambda = tau*lambda) %>%
+  mutate(r_t = rnorm(N, sd = tau_lambda))
+sim_horseshoe
+
+sim_horseshoe %>% ggplot(aes(date, tau_lambda)) + geom_point() + scale_y_log10()
+
+
+fit <-
+  stan("stan/rhs_volatility.stan",
+       data = list(T = nrow(spx_weekly), r_t = spx_weekly$pct_return,
+                   tau0 = tau0, c = 0.5),
+       chains = 1, iter = 1e3)
+
+print(fit, pars = c("mu", "log_sigma"))
+
+s <- extract(fit)
+s$eps %>%
+  as_tibble() %>%
+  mutate(sample_id = row_number()) %>%
+  pivot_longer(-sample_id, names_to = "time_id") %>%
+  mutate(time_id = as.integer(str_extract(time_id, "[0-9]+")))
 ```
 
