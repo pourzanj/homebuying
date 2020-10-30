@@ -12,12 +12,16 @@ parameters {
   vector<lower=0>[T-1] lambda;
 }
 transformed parameters {
-  // Set time varying volatilities (mostly constant with discontinuous jumps) 
+  // Set time varying volatilities
   vector[T] log_sigma_t;
   
   log_sigma_t[1] = log_sigma1;
-  for (t in 2:T)
+  for (t in 2:T) {
+    // Volatility this week is equal to volatility last week plus a horseshoe
+    // shock that is usually zero, but occasionally some large non-zero change.
+    // Thus for weeks at a time volatility effectively does not change.
     log_sigma_t[t] += log_sigma_t[t-1] + eps[t];
+  }
 }
 model {
   // Horseshoe prior on variance shocks (usually variance will remain unchanged week-to-week)
