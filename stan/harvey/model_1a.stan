@@ -1,5 +1,5 @@
 functions {
-  real sign(real x) {
+  real sign_real(real x) {
     if(x < 0.0) {
       return -1.0;
     } else {
@@ -62,7 +62,56 @@ functions {
   real u(real x, real mu, real lambda, real v, real nu, real gamma) {
     real eps = (x - mu) / exp(lambda) + expec_fsgt(v, nu, gamma);
     real mu_eps = expec_fsgt(v, nu, gamma);
-    return((nu*v/2 + 1) * (1 - mu_eps / eps) * (fabs(eps)^v / (fabs(eps)^v + nu*gamma^(v*sign(eps)))) - 1);
+    return((nu*v/2 + 1) * (1 - mu_eps / eps) * (fabs(eps)^v / (fabs(eps)^v + nu*gamma^(v*sign_real(eps)))) - 1);
+  }
+  
+  vector get_lambda(vector y,
+                    real omega, real phi, real k1, real k2, real lambda1,
+                    real mu, real v, real nu, real gamma) {
+    int T = num_elements(y);
+    vector[T] Eeps;
+    vector[T] eps;
+    vector[T] u_t;
+    vector[T] h;
+    vector[T] lambda;
+    
+    lambda[1] = lambda1;
+    Eeps[1] = expec_fsgt(v, nu, gamma);
+    eps[1] = (y[1] - mu)/exp(lambda[1]) + Eeps[1];
+    u_t[1] = u(y[1], mu, lambda[1], v, nu, gamma);
+    h[1] = k1*u_t[1] + k2*sign_real(-eps[1])*(u_t[1]+1);
+    
+    for (t in 2:T) {
+      lambda[t] = omega*(1-phi) + phi*lambda[t-1] + h[t-1];
+      
+      Eeps[t] = expec_fsgt(v, nu, gamma);
+      eps[t] = (y[t] - mu)/exp(lambda[t]) + Eeps[t];
+      u_t[t] = u(y[t], mu, lambda[t], v, nu, gamma);
+      h[t] = k1*u_t[t] + k2*sign_real(-eps[t])*(u_t[t]+1);
+    }
+    
+    return lambda;
+  }
+  
+  # Compute lp for each point and returns as vector
+  vector get_lp_vec(vector x,
+                    real omega, real phi, real k1, real k2, real lambda1,
+                    real mu, real v, real nu, real gamma) {
+    int N = num_elements(x);
+    
+    vector[N] lambda = get_lambda(x,
+                                  omega, phi, k1, k2, lambda1,
+                                  mu, v, nu, gamma);
+    
+    vector[N] eps = (x - mu) ./ exp(lambda) + expec_fsgt(v, nu, gamma);
+    real term1 = log(2) - log(gamma + 1/gamma);
+    real term2 = log(v) - log(2*nu^(1/v));
+    real term3 = -lbeta(nu/2, 1/v);
+    vector[N] main_term = -(nu/2 + 1/v) * log(1 + (1/nu) * pow_vec(fabs(eps), v) ./ pow_real_vec(gamma, v * sign_vec(eps)));
+
+    vector[N] log_p = -lambda + term1 + term2 + term3 + main_term;
+    
+    return log_p;
   }
 }
 data {
@@ -80,6 +129,16 @@ data {
   real m_v; real<lower=0> s_v;
   real m_nu; real<lower=0> s_nu;
   real m_gamma; real<lower=0> s_gamma;
+  
+  // real true_omega;
+  // real<lower=0, upper=1> true_phi;
+  // real true_k1;
+  // real true_k2;
+  // real true_lambda1;
+  // real true_mu;
+  // real<lower=1> true_v;
+  // real<lower=2> true_nu;
+  // real<lower=0> true_gamma;
 }
 transformed data {
   // real omega = -0.3;
@@ -90,7 +149,7 @@ transformed data {
   // real mu = 0;
   // real<lower=1> v = 2;
   // real<lower=2> nu = 10;
-  // real<lower=0> gamma = 1;
+  // real<lower=0> gamma = 0.6;
 }
 parameters {
   
@@ -120,7 +179,7 @@ transformed parameters {
   Eeps[1] = expec_fsgt(v, nu, gamma);
   eps[1] = (y[1] - mu)/exp(lambda[1]) + Eeps[1];
   u_t[1] = u(y[1], mu, lambda[1], v, nu, gamma);
-  h[1] = k1*u_t[1] + k2*sign(-eps[1])*(u_t[1]+1);
+  h[1] = k1*u_t[1] + k2*sign_real(-eps[1])*(u_t[1]+1);
   
   for (t in 2:T) {
     lambda[t] = omega*(1-phi) + phi*lambda[t-1] + h[t-1];
@@ -128,7 +187,7 @@ transformed parameters {
     Eeps[t] = expec_fsgt(v, nu, gamma);
     eps[t] = (y[t] - mu)/exp(lambda[t]) + Eeps[t];
     u_t[t] = u(y[t], mu, lambda[t], v, nu, gamma);
-    h[t] = k1*u_t[t] + k2*sign(-eps[t])*(u_t[t]+1);
+    h[t] = k1*u_t[t] + k2*sign_real(-eps[t])*(u_t[t]+1);
   }
 }
 model {

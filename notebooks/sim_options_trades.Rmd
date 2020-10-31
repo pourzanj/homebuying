@@ -1,0 +1,81 @@
+---
+title: "Simulated Options Trading"
+output: html_notebook
+---
+
+```{r load_functions}
+# Takes SPX df with date, pct_return and holdout_idx columns and fits up to
+# desired holdout_idx
+fit_ahead <- function(dat, max_holdout_idx = 0) {
+  
+  print(paste("Fitting up to holdout index", max_holdout_idx))
+  
+  # Filter out data past the holdout max
+  holdout <-
+    dat %>%
+    filter(holdout_idx <= max_holdout_idx)
+  
+  # Fit
+  fit <-
+    stan("stan/stoch_vol.stan",
+         data = list(T = nrow(holdout), y = holdout$pct_return),
+         cores = 4, chains = 4, iter = 5e3)
+  
+  # Return
+  fit
+}
+```
+
+
+# Get Data
+
+## SPX
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(tidyquant)
+library(rstan)
+
+holdout_start_date <- ymd("2019-09-06")
+
+spx_weekly <-
+  tq_get("^GSPC",
+         get = "stock.prices",
+         from = "2018-09-07",
+         to = "2020-08-28") %>%
+  mutate(year = year(date), week = epiweek(date)) %>%
+  group_by(week, year) %>%
+  mutate(weekday = weekdays(date)) %>%
+  filter(weekday == "Friday" | weekday == "Thursday") %>%
+  filter(date == max(date)) %>%
+  ungroup() %>%
+  mutate(pct_return = 100*(close - lag(close)) / lag(close)) %>%
+  select(date, weekday, close, pct_return) %>%
+  mutate(holdout = date >= holdout_start_date) %>%
+  group_by(holdout) %>%
+  mutate(holdout_idx = row_number()) %>%
+  ungroup() %>%
+  mutate(holdout_idx = ifelse(holdout, holdout_idx, 0)) %>%
+  na.omit()
+
+spx_weekly %>%
+  select(date, holdout, close, pct_return) %>%
+  pivot_longer(c(-date, -holdout)) %>%
+  ggplot(aes(date, value, color = holdout)) +
+  geom_line() +
+  geom_vline(xintercept = holdout_start_date, color = "red") +
+  facet_grid(name ~ ., scales = "free") +
+  scale_x_date(date_breaks = "months", date_labels="%m/%y") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1))
+```
+
+
+## Options
+
+# Refit Model for Every Week
+
+```{r}
+fit <- fit_ahead(spx_weekly,  max_holdout_idx = 0)
+```
+

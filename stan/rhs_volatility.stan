@@ -40,4 +40,7 @@ model {
   // Likelihood of returns data
   r_t ~ normal(mu, exp(log_sigma));
 }
+generated quantities {
+  real r_t_rep[T] = normal_rng(mu, exp(log_sigma));
+}
 

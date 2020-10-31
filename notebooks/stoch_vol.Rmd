@@ -1,0 +1,238 @@
+---
+title: "Stochastic Volatility Model"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(tidyquant)
+library(rstan)
+
+holdout_start_date <- ymd("2019-09-01")
+
+spx <-
+  tq_get("^GSPC",
+         get = "stock.prices",
+         from = "2017-09-01",
+         to = "2020-09-01") %>%
+  arrange(date) %>%
+  mutate(pct_return = 100 * (close - lag(close)) / lag(close)) %>%
+  na.omit() %>%
+  mutate(holdout = date > holdout_start_date) %>%
+  group_by(holdout) %>%
+  mutate(holdout_idx = row_number()) %>%
+  ungroup() %>%
+  mutate(holdout_idx = ifelse(holdout, holdout_idx, 0)) %>%
+  # if any returns are exactly zero this causes the lp to evaluate to zero
+  mutate(pct_return = ifelse(pct_return == 0.0, 1e-4, pct_return))
+
+spx %>%
+  select(date, holdout, close, pct_return) %>%
+  pivot_longer(c(-date, -holdout)) %>%
+  ggplot(aes(date, value, color = holdout)) +
+  geom_line() +
+  geom_vline(xintercept = holdout_start_date, color = "red") +
+  facet_grid(name ~ ., scales = "free") +
+  scale_x_date(date_breaks = "months", date_labels="%m/%y") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1))
+```
+
+Fit
+
+```{r}
+spx_train <- spx %>% filter(!holdout)
+spx_holdout <- spx %>% filter(holdout)
+
+fit <-
+  stan("stan/stoch_vol.stan",
+       data = list(T = nrow(spx_train), y = spx_train$pct_return),
+       chains = 1, iter = 1e3)
+
+print(fit, pars = c("mu", "phi", "sigma"))
+```
+
+Look at options in the future
+
+```{r}
+spxw_opt <-
+  read_csv("data/Batch__LX1d2sapX/SPXW_2019.csv") %>%
+  select(underlying, underlying_last,
+         type, expiration, quotedate, strike,
+         last, bid, ask, volume, openinterest) %>%
+  mutate_at(c("expiration", "quotedate"), mdy) %>%
+  mutate(expir_weekday = weekdays(expiration),
+         quote_weekday = weekdays(quotedate)) %>%
+  mutate(avg_price = (ask + bid) / 2) %>%
+  mutate(pct_strike = (strike - underlying_last) / underlying_last) %>%
+  mutate(avg_price_pct_und = avg_price / underlying_last) %>%
+  select(quote_weekday, quotedate,
+         underlying, expir_weekday, expiration, type, strike,
+         underlying_last, last, bid, ask, avg_price, avg_price_pct_und,
+         volume, openinterest)
+
+spxw_opt %>%
+  
+  filter(type == "put") %>%
+  filter(bid > 0, strike < underlying_last) %>%
+  mutate(strike_pct = 100*(strike-underlying_last)/underlying_last) %>%
+  ggplot(aes(strike_pct, avg_price)) +
+  geom_point()
+```
+
+Sample trajectories of underlying into the future
+
+```{r}
+s <- extract(fit)
+
+sample_ahead <- function(sample_id,
+                         mu, phi, sigma, h0,
+                         dates) {
+  
+  N <- length(dates)
+  delta <- rnorm(N)
+  h <- rep(0.0, N)
+  eps <- rnorm(N)
+  y <- rep(0.0, N)
+  
+  h[1] <- mu + phi*(h0 - mu) + delta[1]*sigma
+  y[1] <- eps[1] * exp(h[1]/2)
+  
+  for (t in 2:N) {
+    h[t] <- mu + phi*(h[t-1] - mu) + delta[t]*sigma
+    y[t] <- eps[t] * exp(h[t]/2)
+  }
+  
+  tibble(sample_id, days_ahead = 1:N, date = dates, delta, h, eps, y)
+}
+
+samples <- tibble(sample_id = 1:500, mu = s$mu, phi = s$phi, sigma = s$sigma, h0 = s$h[, 501])
+
+holdout_sims_1month <-
+  samples %>%
+  pmap_dfr(sample_ahead,
+           dates = filter(spx_holdout, date >= ymd("2019-09-03") & date <= ymd("2019-10-02"))$date) %>%
+  group_by(sample_id) %>%
+  mutate(ret = 1 + (y/100)) %>%
+  mutate(cum_ret = cumprod(ret)) %>%
+  ungroup()
+
+holdout_sims_1month %>%
+  ggplot(aes(date, cum_ret, group = sample_id)) +
+  geom_line()
+
+holdout_sims_1month %>%
+  filter(date == max(date)) %>%
+  ggplot(aes(cum_ret)) +
+  geom_histogram()
+
+sim_draws <-
+  holdout_sims_1month %>%
+  select(sample_id, date, y) %>%
+  mutate(sim = TRUE)
+
+true_draws <-
+  spx_holdout %>%
+  filter(date <= ymd("2019-10-02")) %>%
+  mutate(sample_id = NA) %>%
+  select(sample_id, date, y = pct_return) %>%
+  mutate(sim = FALSE)
+
+bind_rows(sim_draws, true_draws) %>%
+  filter(sample_id %in% sample(1:500, 4) | is.na(sample_id)) %>%
+  ggplot(aes(date, y, group = sample_id, color = sim)) +
+  geom_line()
+
+bind_rows(sim_draws, true_draws) %>%
+  filter(sample_id %in% sample(1:500, 15) | is.na(sample_id)) %>%
+  ggplot(aes(y, fill = sim)) +
+  geom_histogram() + facet_wrap(sample_id ~ .)
+```
+
+Use trajectories to price put spreads options
+
+```{r}
+cum_ret <-
+  holdout_sims_1month %>%
+  filter(date == max(date)) %>%
+  pull(cum_ret)
+
+spxw_opt %>%
+  filter(quotedate == ymd("2019-09-03"), expiration = ymd("2019-10-02"))
+  filter(type == "put") %>%
+  filter(bid > 0, strike < underlying_last) %>%
+  mutate(strike_pct = 100*(strike-underlying_last)/underlying_last) %>%
+  arrange(strike_pct) %>%
+  mutate(put_spread_price = 100*(avg_price - lag(avg_price)),
+         max_loss = (strike - lag(strike))*100) %>%
+  select(strike_pct, put_spread_price, max_loss) %>%
+  filter(strike_pct >= -7.5) %>%
+  mutate(pr_max_loss = map_dbl(strike_pct, function(x) mean((1+x/100) > cum_ret))) %>%
+  mutate(expec = put_spread_price*(1-pr_max_loss) - max_loss*pr_max_loss) %>%
+  pivot_longer(-strike_pct) %>%
+  ggplot(aes(strike_pct, value)) +
+  geom_point() +
+  facet_grid(name ~ ., scales = "free")
+```
+
+# Fit one day ahead
+
+```{r}
+fit_wrapper <- function(dat, max_holdout_idx = 0) {
+  
+  print(paste("Fitting up to holdout index", max_holdout_idx))
+  
+  # Filter out data past the holdout max
+  holdout <-
+    dat %>%
+    filter(holdout_idx <= max_holdout_idx)
+  
+  # Fit
+  fit <-
+  stan("stan/stoch_vol.stan",
+       data = list(T = nrow(holdout), y = holdout$pct_return),
+       chains = 1, iter = 1e3)
+  
+  # 
+  s <- extract(fit)
+  last_idx <- dim(s$h)[2]
+  h_last <- s$h[, last_idx]
+  h_pred_expect <- s$mu + s$phi*(h_last - s$mu)
+  delta <- rnorm(length(h_last))
+  h_pred <- s$mu + s$phi*(h_last - s$mu) + delta*s$sigma
+  
+  eps <- rnorm(length(h_last))
+  y_pred <- eps * exp(h_pred / 2)
+  
+  pred_date <- dat$date[nrow(holdout) + 1]
+  tibble(date = pred_date, h_last, h_pred_expect, delta, h_pred, eps, y_pred)
+}
+
+one_day_refit_preds <-
+  0:199 %>%
+  map_dfr(fit_wrapper, dat = spx)
+
+one_day_ahead_actual <-
+  spx_holdout %>%
+  filter(date <= ymd("2019-06-16")) %>%
+  select(date, pct_return)
+
+one_day_refit_preds %>%
+  ggplot() +
+  geom_histogram(aes(y_pred)) +
+  facet_wrap(date ~ .) +
+  geom_vline(aes(xintercept = pct_return), color = "red", data = one_day_ahead_actual)
+
+one_day_refit_preds %>%
+  inner_join(one_day_ahead_actual) %>%
+  group_by(date) %>%
+  summarize(p = mean(pct_return < y_pred)) %>%
+  ggplot(aes(p)) +
+  geom_histogram()
+
+one_day_refit_preds %>%
+  inner_join(one_day_ahead_actual) %>%
+  group_by(date) %>%
+  summarize(p = mean(pct_return < y_pred)) %>% ggplot(aes(date, p)) + geom_point()
+```
+
