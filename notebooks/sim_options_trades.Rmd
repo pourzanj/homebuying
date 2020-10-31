@@ -1,63 +1,26 @@
 ---
 title: "Simulated Options Trading"
-output: html_notebook
+output:
+  pdf_document: default
+  html_notebook: default
 ---
 
-```{r load_functions}
-# Takes SPX df with date, pct_return and holdout_idx columns and fits up to
-# desired holdout_idx
-fit_ahead <- function(dat, max_holdout_idx = 0) {
-  
-  print(paste("Fitting up to holdout index", max_holdout_idx))
-  
-  # Filter out data past the holdout max
-  holdout <-
-    dat %>%
-    filter(holdout_idx <= max_holdout_idx)
-  
-  # Fit
-  fit <-
-    stan("stan/stoch_vol.stan",
-         data = list(T = nrow(holdout), y = holdout$pct_return),
-         cores = 4, chains = 4, iter = 5e3)
-  
-  # Return
-  fit
-}
-```
+```{r setup}
+knitr::opts_chunk$set(echo = FALSE,
+                      results = "hide")
 
+library(tidyverse)
+library(lubridate)
+```
 
 # Get Data
 
 ## SPX
 
-```{r}
-library(tidyverse)
-library(lubridate)
-library(tidyquant)
-library(rstan)
+```{r plot_spx}
+holdout_start_date <- ymd("2019-09-13")
 
-holdout_start_date <- ymd("2019-09-06")
-
-spx_weekly <-
-  tq_get("^GSPC",
-         get = "stock.prices",
-         from = "2018-09-07",
-         to = "2020-08-28") %>%
-  mutate(year = year(date), week = epiweek(date)) %>%
-  group_by(week, year) %>%
-  mutate(weekday = weekdays(date)) %>%
-  filter(weekday == "Friday" | weekday == "Thursday") %>%
-  filter(date == max(date)) %>%
-  ungroup() %>%
-  mutate(pct_return = 100*(close - lag(close)) / lag(close)) %>%
-  select(date, weekday, close, pct_return) %>%
-  mutate(holdout = date >= holdout_start_date) %>%
-  group_by(holdout) %>%
-  mutate(holdout_idx = row_number()) %>%
-  ungroup() %>%
-  mutate(holdout_idx = ifelse(holdout, holdout_idx, 0)) %>%
-  na.omit()
+spx_weekly <- read_rds("../data/spx_weekly.rds")
 
 spx_weekly %>%
   select(date, holdout, close, pct_return) %>%
@@ -70,12 +33,69 @@ spx_weekly %>%
   theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1))
 ```
 
-
 ## Options
+
+```{r plot_options}
+spxw_opt <- read_rds("../data/spxw_opt.rds")
+
+spxw_opt %>%
+  filter(quotedate <= ymd("2019-12-20")) %>%
+  ggplot(aes(pct_strike, mid_price, color = type)) +
+  geom_point() +
+  facet_wrap(expiration ~ .) +
+  xlab("Option Strike As Pct of Underlying") +
+  ylab("Option Price") +
+  labs(title = "SPX Friday-Expiring Option Prices Quoted One Week Before Expiration",
+              subtitle = "",
+              caption = "Only options included in VIX are Considered")
+```
 
 # Refit Model for Every Week
 
-```{r}
-fit <- fit_ahead(spx_weekly,  max_holdout_idx = 0)
+```{r one_week_ahead_pred_and_opt_prices}
+y_ahead_09_06_19 <- read_rds("../data/y_ahead_09_06_19.rds")
+
+
+spxw_opt_09_06_19 <- 
+  spxw_opt %>%
+  filter(quotedate== ymd("2019-09-06"))
+  
+trap_area <-
+  spxw_opt_09_06_19 %>%
+  group_by(strike) %>%
+  filter(mid_price == max(mid_price)) %>%
+  ungroup() %>%
+  mutate(width = lead(pct_strike) - pct_strike,
+         avg_height = (mid_price + lead(mid_price)) / 2) %>%
+  mutate(trap_area = width * avg_height) %>%
+  pull(trap_area) %>%
+  na.omit() %>%
+  sum()
+
+y_ahead_09_06_19 %>%
+  ggplot(aes(y_ahead)) +
+  geom_histogram(aes(y = trap_area*..density..), binwidth = 0.25) +
+  geom_point(aes(pct_strike, mid_price, color = type), data = spxw_opt_09_06_19) +
+  xlab("Option Strike As Pct of Underlying") +
+  ylab("Option Price") +
+  labs(title = "Prices for SPX Options Expiring 9/13/2019 Quoted One Week Before",
+              subtitle = "Normalized Histogram of Predicted Returns From SV Model Underlayed",
+              caption = "Only options included in VIX are Considered")
 ```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

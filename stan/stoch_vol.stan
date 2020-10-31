@@ -26,5 +26,7 @@ model {
   y ~ normal(0, exp(h / 2));
 }
 generated quantities {
-  vector[T] y_rep = normal_rng(0, exp(h / 2));
+  real y_rep[T] = normal_rng(0, exp(h / 2));
+  real h_ahead = mu + phi * (h[T] - mu) + normal_rng(0, sigma);
+  real y_ahead = normal_rng(0, exp(h_ahead / 2));
 }
