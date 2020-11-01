@@ -28,6 +28,31 @@ fit_ahead <- function(dat, max_holdout_idx = 0) {
   fit
 }
 
+# Same as fit ahead but only gets certain parameters as tibble to save memory
+fit_ahead_compressed <- function(dat, max_holdout_idx = 0) {
+  
+  print(paste("Fitting up to holdout index", max_holdout_idx))
+  
+  # Filter out data past the holdout max
+  holdout <-
+    dat %>%
+    filter(holdout_idx <= max_holdout_idx)
+  
+  # Fit
+  fit <-
+    stan("stan/stoch_vol.stan",
+         data = list(T = nrow(holdout), y = holdout$pct_return),
+         cores = 4, chains = 4, iter = 5e3,
+         control = list(adapt_delta = 0.999))
+  
+  # Return
+  s <- extract(fit)
+  tibble(max_holdout_idx,
+         mu = s$mu, phi = s$phi, sigma = s$sigma,
+         h_ahead = s$h_ahead, y_ahead = s$y_ahead) %>%
+    mutate(sample_id = row_number())
+}
+
 
 
 # Filters the options quotes for a single day to include only those included in
@@ -137,6 +162,7 @@ write_rds(spxw_opt, "data/spxw_opt.rds")
 # Fit Models
 ####################
 
+# Fit just first week
 fit <- fit_ahead(spx_weekly,  max_holdout_idx = 0)
 
 s <- extract(fit)
@@ -145,5 +171,5 @@ y_ahead <- tibble(y_ahead = s$y_ahead)
 write_rds(y_ahead, "data/y_ahead_09_06_19.rds")
 
 
-
-
+# Fit all models
+fits <- map_dfr(0:1, fit_ahead_compressed, dat = spx_weekly)

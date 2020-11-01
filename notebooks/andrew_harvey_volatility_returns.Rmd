@@ -278,12 +278,73 @@ tibble(date = spx$date, pct_return = spx$pct_return) %>%
   geom_point()
 ```
 
+# Calibrate Priors with prior predictive
+
+```{r}
+library(truncnorm)
+
+generate_egarch_sgt_score <- function(i,
+                                      omega, phi, k1, k2, lambda1,
+                                      mu, l, p, q,
+                                      date) {
+  # Initialize output vectors
+  N <- length(date)
+  u_t1 <- rep(0.0, N)
+  h <- rep(0.0, N)
+  lambda <- rep(0.0, N)
+  y <- rep(0.0, N)
+  
+  h[1] <- 0.0
+  lambda[1] <- lambda1
+  y[1] <-
+    rsgt(1,
+         mu, exp(lambda[1]), l, p, q,
+         mean.cent = FALSE, var.adj = FALSE)
+    
+  for(t in 2:N) {
+    u_t1[t] <- u(y[t-1], mu, exp(lambda[t-1]), l, p, q)
+    h[t] <- k1*u_t1[t] + k2*sign(-y[t-1])*(u_t1[t]+1)
+    lambda[t] <- omega + phi*lambda[t-1] + h[t]
+    y[t] <-
+      rsgt(1,
+           mu, exp(lambda[t]), l, p, q,
+           mean.cent = FALSE, var.adj = FALSE)
+  }
+  
+  tibble(sample_id = i, date, u_t1 = u_t1, h, lambda, y)
+}
+
+# Draw from prior
+N <- 100
+
+prior_draws <-
+  tibble(i = 1:N,
+         omega = rnorm(N, 0, 2),
+         phi = runif(N, 0, 1),
+         k1 = rnorm(N, 0, 0.1),
+         k2 = rnorm(N, 0, 0.1),
+         lambda1 = rnorm(N, 0, 2),
+         mu = rnorm(N, 0, 1),
+         l = runif(N, -1, 1),
+         p = rtruncnorm(N, a=1, b=Inf, mean=1, sd=5),
+         q = rtruncnorm(N, a=2, b=Inf, mean=100, sd=100))
+
+# For each prior foward simulate
+prior_pred_sims <-
+  prior_draws %>%
+  sample_n(5) %>%
+  pmap_dfr(generate_egarch_sgt_score, date = dat$date)
+
+prior_pred_sims %>%
+  ggplot(aes(date, y, color = as.factor(sample_id))) +
+  geom_line()
+```
 
 
 
 
 
-
+# Looking at Great Recession
 
 ```{r calm_vs_tumultuous_great_recession}
 # look at calm vs tumultuous in great recession to see if tails behavior
