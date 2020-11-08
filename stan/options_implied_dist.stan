@@ -71,7 +71,6 @@ transformed data {
   vector<lower=0>[N_c] log_c_o = log(c_o);
   
   int x_i[0];
-  real x_r[0];
 }
 parameters {
   // Percent returns distribution
@@ -86,15 +85,24 @@ transformed parameters {
   vector<lower=0>[N_p] log_p_e;
   vector<lower=0>[N_p] log_c_e;
   
-  real theta[2] = { mu, sigma };
-  
   // Compute expected value of puts under distribution for every strike k
   for(k in 1:N_p) {
-    // log_p_e[k] = integrate_1d(put_price_normal, 0, k_p[k], { mu, sigma }, x_r, x_i);
-    log_p_e[k] = log(integrate_1d(call_price_normal,
-                             1.0,
-                             positive_infinity(),
-                             theta, x_r, x_i));
+    log_p_e[k] = log(integrate_1d(put_price_normal,
+                                  0, k_p[k],
+                                  { mu, sigma },
+                                  { k_p[k], s0},
+                                  x_i,
+                                  1e-2));
+  }
+  
+  // Compute expected value of calls under distribution for every strike k
+  for(k in 1:N_c) {
+    log_c_e[k] = log(integrate_1d(call_price_normal,
+                                  k_c[k], positive_infinity(),
+                                  { mu, sigma },
+                                  { k_c[k], s0},
+                                  x_i,
+                                  1e-2));
   }
 }
 model {

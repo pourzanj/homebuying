@@ -35,5 +35,5 @@ model {
   target += log(integrate_1d(normal_density,
                              left_limit,
                              positive_infinity(),
-                             { mu, sigma }, x_r, x_i));
+                             { mu, sigma }, x_r, x_i, 1e-2));
 }
