@@ -65,10 +65,14 @@ data {
   // Observed prices of puts and calls
   vector<lower=0>[N_p] p_o;
   vector<lower=0>[N_c] c_o;
+  
+  // Bid ask spreads
+  vector<lower=0>[N_p] p_spread;
+  vector<lower=0>[N_c] c_spread;
 }
 transformed data {
-  vector<lower=0>[N_p] log_p_o = log(p_o);
-  vector<lower=0>[N_c] log_c_o = log(c_o);
+  vector[N_p] log_p_o = log(p_o);
+  vector[N_c] log_c_o = log(c_o);
   
   int x_i[0];
 }
@@ -76,14 +80,14 @@ parameters {
   // Percent returns distribution
   real mu;
   real<lower=0> sigma;
-  
-  // Observational model of options prices
-  real<lower=0> sigma_o;
 }
 transformed parameters {
   // Expected priced of puts and calls
-  vector<lower=0>[N_p] log_p_e;
-  vector<lower=0>[N_p] log_c_e;
+  vector[N_p] log_p_e;
+  vector[N_c] log_c_e;
+  
+  // print("mu: ", mu);
+  // print("sigma: ", sigma);
   
   // Compute expected value of puts under distribution for every strike k
   for(k in 1:N_p) {
@@ -95,6 +99,8 @@ transformed parameters {
                                   1e-2));
   }
   
+  // print("p_e: ", exp(log_p_e));
+  
   // Compute expected value of calls under distribution for every strike k
   for(k in 1:N_c) {
     log_c_e[k] = log(integrate_1d(call_price_normal,
@@ -104,11 +110,13 @@ transformed parameters {
                                   x_i,
                                   1e-2));
   }
+  
+  // print("c_e: ", exp(log_c_e));
 }
 model {
   // Observed prices are a noisy observation of expected prices
   // under the distribution
-  log_p_o ~ normal(log_p_e, sigma_o);
-  log_c_o ~ normal(log_c_e, sigma_o);
+  log_p_o ~ normal(log_p_e, p_spread/4);
+  log_c_o ~ normal(log_c_e, c_spread/4);
 }
 
