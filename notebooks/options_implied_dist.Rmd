@@ -1,0 +1,189 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+spxw_opt_2019_9_13 <-
+  spxw_opt %>%
+  filter(expiration == ymd("2019-09-13")) %>%
+  arrange(strike)
+
+spxw_opt_2019_9_13 %>%
+  mutate(bid_ask_spread = ask - bid) %>%
+  mutate(bid_ask_spread_norm = bid_ask_spread / bid) %>%
+  mutate(log_bid_ask_spread = log(bid_ask_spread)) %>%
+  ggplot(aes(strike, bid_ask_spread_norm)) +
+  geom_point()
+
+spxw_opt_2019_9_13 %>%
+  ggplot(aes(strike, color = type)) +
+  geom_errorbar(aes(ymin = bid, ymax = ask)) +
+  scale_y_log10()
+
+spxw_opt_2019_9_13 %>%
+    mutate(bid_ask_spread = ask - bid) %>%
+    mutate(bid_ask_spread_norm = bid_ask_spread / bid) %>%
+    mutate(log_bid_ask_spread = log(ask) - log(bid)) %>%
+    ggplot(aes(strike, log_bid_ask_spread)) +
+    geom_point()
+
+# Filter out unreliable options with noisy prices
+spxw_opt_2019_9_13_filtered <-
+  spxw_opt_2019_9_13 %>%
+  mutate(log_bid_ask_spread = log(ask) - log(bid)) %>%
+  #filter(abs(log_bid_ask_spread) < 0.1) %>%
+  filter(abs(pct_strike) < 5)
+
+puts <- spxw_opt_2019_9_13_filtered %>% filter(type == "put")
+calls <- spxw_opt_2019_9_13_filtered %>% filter(type == "call")
+
+spxw_opt_2019_9_13 %>%
+  ggplot(aes(strike, mid_price)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = bid, ymax = ask)) + 
+  scale_y_log10()
+```
+
+```{r}
+dat <-
+  list(s0 = puts$underlying_last[1],
+       N_p = nrow(puts), N_c = nrow(calls),
+       k_p = puts$strike, k_c = calls$strike,
+       p_o = puts$mid_price, c_o = calls$mid_price,
+       p_spread = puts$log_bid_ask_spread, c_spread = calls$log_bid_ask_spread)
+
+fit <-
+    stan("stan/options_implied_dist.stan",
+         data = dat, chains = 1, iter = 1e3,
+         init = list(list(mu = -0.1, sigma = 1.44)))
+
+print(fit, pars = c("mu", "sigma"))
+
+# Plot put prices
+summary_raw <- summary(fit)$summary[, c("2.5%", "97.5%")]
+summary <-
+  summary_raw %>%
+  as_tibble() %>%
+  mutate(par = rownames(summary_raw))
+
+summary_puts <-
+  summary %>%
+  filter(str_detect(par, "p_o_rep")) %>%
+  bind_cols(puts)
+
+puts_theoretical <-
+  summary %>%
+  filter(str_detect(par, "p_t")) %>%
+  bind_cols(puts)
+
+summary_puts %>%
+  ggplot(aes(strike)) +
+  geom_errorbar(aes(ymin = bid, ymax = ask)) +
+  geom_errorbar(aes(ymin = `2.5%`, ymax = `97.5%`), color = "red") +
+  geom_errorbar(aes(ymin = `2.5%`, ymax = `97.5%`), color = "blue", data = puts_theoretical)
+
+# Plot random effects error terms
+puts_error <-
+  summary %>%
+  filter(str_detect(par, "p_error")) %>%
+  bind_cols(puts)
+
+puts_error %>%
+  ggplot(aes(strike)) +
+  geom_errorbar(aes(ymin = `2.5%`, ymax = `97.5%`))
+```
+
+```{r sgt}
+grid <-
+  crossing(x = seq(-5, 5, by = 0.01),
+           q = c(2, 5, 10, 100, Inf)) %>%
+  mutate(pdf = dsgt(x, q = q, mean.cent = FALSE, var.adj = FALSE))
+
+grid %>%
+  ggplot(aes(x, pdf, color = as.factor(q))) +
+  geom_line()
+
+dat <-
+  list(s0 = puts$underlying_last[1],
+       N_p = nrow(puts), N_c = nrow(calls),
+       k_p = puts$strike, k_c = calls$strike,
+       p_o = puts$mid_price, c_o = calls$mid_price,
+       p_spread = puts$log_bid_ask_spread, c_spread = calls$log_bid_ask_spread,
+       m_lambda = 0, s_lambda = 2e-1,
+       m_p = 2, s_p = 0.5,
+       m_q = 10, s_q = 10)
+
+fit_sgt <-
+    stan("stan/options_implied_dist_sgt.stan",
+         data = dat, chains = 2, cores = 2,
+         iter = 5e2, refresh = 10,
+         init = list(list(mu = -0.1, sigma = 1.44, lambda = 0, p = 1.5, q = 3)))
+```
+
+```{r}
+print(fit_sgt, pars = c("mu", "sigma", "lambda", "p", "q", "tau"))
+
+s <- extract(fit_sgt)
+
+par_samples <-
+  tibble(mu = s$mu, sigma = s$sigma, lambda = s$lambda, p = s$p, q = s$q) %>%
+  mutate(r_rep = pmap_dbl(., rsgt, n = 1, mean.cent = FALSE))
+
+# Plot put prices
+summary_raw <- summary(fit_sgt)$summary[, c("2.5%", "97.5%")]
+summary <-
+  summary_raw %>%
+  as_tibble() %>%
+  mutate(par = rownames(summary_raw))
+
+summary_puts <-
+  summary %>%
+  filter(str_detect(par, "p_o_rep")) %>%
+  bind_cols(puts)
+
+puts_theoretical <-
+  summary %>%
+  filter(str_detect(par, "p_t")) %>%
+  bind_cols(puts)
+
+summary_puts %>%
+  ggplot(aes(strike)) +
+  geom_errorbar(aes(ymin = bid, ymax = ask)) +
+  geom_errorbar(aes(ymin = `2.5%`, ymax = `97.5%`), color = "red") +
+  geom_errorbar(aes(ymin = `2.5%`, ymax = `97.5%`), color = "blue", data = puts_theoretical)
+
+# Plot random effects error terms
+puts_error <-
+  summary %>%
+  filter(str_detect(par, "p_error")) %>%
+  bind_cols(puts)
+
+puts_error %>%
+  ggplot(aes(strike)) +
+  geom_errorbar(aes(ymin = `2.5%`, ymax = `97.5%`))
+```
+
+
+```{r test_integration}
+dat <-
+  list(s0 = puts$underlying_last[1],
+       N_p = nrow(puts), N_c = nrow(calls),
+       k_p = puts$strike, k_c = calls$strike,
+       mu = -0.1, sigma = 1.44,
+       a = 1)
+
+fit_test_integration <-
+    stan("stan/test_integration.stan",
+         data = dat, chains = 1, iter = 1)
+
+extract(fit_test_integration)$p_t[1,]
+K <- puts$strike[1]; integrate(function(x) {r <- 100*(x-2978.71)/2978.71; dnorm(r, -0.1, 1.44) * (100/2978.71) * (K-x)}, 2948, K)
+
+K <- puts$strike[7]; integrate(function(x) {r <- 100*(log(x) - log(2978.71)); dnorm(r, -0.1, 1.44) * (100/x) * (K-x)}, 0, K)
+
+extract(fit_test_integration)$c_t[1,]
+K <- calls$strike[6]; integrate(function(x) {r <- 100*(log(x) - log(2978.71)); dnorm(r, -0.1, 1.44) * (100/x) * (x-K)}, K, 10*2978.71)
+
+```
+
