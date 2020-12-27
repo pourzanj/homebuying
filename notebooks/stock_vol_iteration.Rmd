@@ -1,0 +1,218 @@
+---
+title: "Stochastic Volatility Model Iteration"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(tidyquant)
+library(rstan)
+
+holdout_start_date <- ymd("2019-09-01")
+
+spx <-
+  tq_get("^GSPC",
+         get = "stock.prices",
+         from = "2017-09-01",
+         to = "2020-09-01") %>%
+  arrange(date) %>%
+  mutate(pct_return = 100 * (close - lag(close)) / lag(close)) %>%
+  na.omit() %>%
+  mutate(holdout = date > holdout_start_date) %>%
+  group_by(holdout) %>%
+  mutate(holdout_idx = row_number()) %>%
+  ungroup() %>%
+  mutate(holdout_idx = ifelse(holdout, holdout_idx, 0)) %>%
+  # if any returns are exactly zero this causes the lp to evaluate to zero
+  mutate(pct_return = ifelse(pct_return == 0.0, 1e-4, pct_return))
+
+spx %>%
+  select(date, holdout, close, pct_return) %>%
+  pivot_longer(c(-date, -holdout)) %>%
+  ggplot(aes(date, value, color = holdout)) +
+  geom_line() +
+  geom_vline(xintercept = holdout_start_date, color = "red") +
+  facet_grid(name ~ ., scales = "free") +
+  scale_x_date(date_breaks = "months", date_labels="%m/%y") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1))
+```
+
+```{r}
+spx_train <- spx %>% filter(!holdout)
+spx_holdout <- spx %>% filter(holdout)
+
+fit <-
+  stan("../stan/stoch_vol.stan",
+       data = list(T = nrow(spx_train), y = spx_train$pct_return),
+       chains = 1, iter = 1e3)
+
+fit <-
+  stan("../stan/stoch_vol.stan",
+       data = list(T = nrow(spx_train), y = spx_train$pct_return),
+       chains = 4, iter = 2e4, cores = 4, control = list(adapt_delta = 0.99))
+
+print(fit, pars = c("mu", "phi", "sigma"))
+```
+
+```{r}
+s <- extract(fit)
+
+y_rep_intervals <-
+  s$y_rep %>%
+  apply(2, quantile, probs = c(0.025, 0.975)) %>% t() %>% as_tibble()
+
+spx_train %>%
+  bind_cols(y_rep_intervals) %>%
+  ggplot(aes(date, pct_return)) +
+  geom_ribbon(aes(ymin = `2.5%`, ymax = `97.5%`), alpha = 0.2) +
+  geom_line() +
+  geom_point()
+```
+
+```{r}
+h_intervals <-
+  s$h %>%
+  apply(2, quantile, probs = c(0.025, 0.5, 0.975)) %>% t() %>% as_tibble()
+
+spx_train %>%
+  bind_cols(h_intervals) %>%
+  ggplot(aes(date, `50%`)) +
+  geom_ribbon(aes(ymin = `2.5%`, ymax = `97.5%`), alpha = 0.2) +
+  geom_line() +
+  geom_point()
+```
+
+```{r}
+h_std_intervals <-
+  s$h_std %>%
+  apply(2, quantile, probs = c(0.025, 0.5, 0.975)) %>% t() %>% as_tibble()
+
+spx_train %>%
+  bind_cols(h_std_intervals) %>%
+  ggplot(aes(date, `50%`)) +
+  geom_ribbon(aes(ymin = `2.5%`, ymax = `97.5%`), alpha = 0.2) +
+  geom_line() +
+  geom_point()
+```
+
+```{r}
+spx_train %>%
+  bind_cols(h_intervals) %>%
+  ggplot(aes(date, pct_return / exp(`50%`/2))) +
+  geom_line() +
+  geom_point()
+```
+
+
+# Repeat but for simulated data 
+
+```{r}
+N <- ncol(s$h)
+h <- rep(s$h[1,1], N)
+h_std <- rnorm(N)
+
+mu <- s$mu[1]
+phi <- s$phi[1]
+sigma <- s$sigma[1]
+
+for(t in 2:N) {
+  h[t] <- mu + phi*(h[t-1] - mu) + sigma*h_std[t]
+}
+
+z <- rnorm(N)
+y <- exp(h / 2) * z
+
+spx_sim <-
+  spx_train %>%
+  select(date, pct_return_real = pct_return) %>%
+  mutate(pct_return = y)
+  
+spx_sim %>%
+  rename(pct_return_1 = pct_return_real, pct_return_2 = pct_return) %>%
+  pivot_longer(-date) %>%
+  ggplot(aes(date, value, color = name)) +
+  geom_line() +
+  facet_grid(name ~ .)
+```
+
+```{r}
+fit_sim <-
+  stan("../stan/stoch_vol.stan",
+       data = list(T = nrow(spx_sim), y = spx_sim$pct_return_sim),
+       chains = 1, iter = 1e3)
+
+print(fit_sim, pars = c("mu", "phi", "sigma"))
+```
+```{r}
+s_sim <- extract(fit_sim)
+
+y_rep_intervals_sim <-
+  s_sim$y_rep %>%
+  apply(2, quantile, probs = c(0.025, 0.975)) %>% t() %>% as_tibble()
+
+spx_sim %>%
+  bind_cols(y_rep_intervals_sim) %>%
+  ggplot(aes(date, pct_return_sim)) +
+  geom_ribbon(aes(ymin = `2.5%`, ymax = `97.5%`), alpha = 0.2) +
+  geom_line() +
+  geom_point()
+```
+
+```{r}
+h_intervals_sim <-
+  s_sim$h %>%
+  apply(2, quantile, probs = c(0.025, 0.5, 0.975)) %>% t() %>% as_tibble()
+
+spx_sim %>%
+  bind_cols(h_intervals_sim) %>%
+  ggplot(aes(date, `50%`)) +
+  geom_ribbon(aes(ymin = `2.5%`, ymax = `97.5%`), alpha = 0.2) +
+  geom_line() +
+  geom_point()
+```
+
+```{r}
+h_std_intervals <-
+  s$h_std %>%
+  apply(2, quantile, probs = c(0.025, 0.5, 0.975)) %>% t() %>% as_tibble()
+
+spx_sim %>%
+  bind_cols(h_std_intervals) %>%
+  ggplot(aes(date, `50%`)) +
+  geom_ribbon(aes(ymin = `2.5%`, ymax = `97.5%`), alpha = 0.2) +
+  geom_line() +
+  geom_point()
+```
+
+```{r}
+y_rep_rep <- pmax(s$y_rep_rep, -30)
+
+leverages <-
+  tibble(date = spx$date,
+         s_pred = apply(exp(s$h_rep / 2), 2, mean),
+         `0` = apply(log(1 + 0*y_rep_rep / 100), 2, mean),
+         `0.5` = apply(log(1 + 0.5*y_rep_rep / 100), 2, mean),
+         `1` = apply(log(1 + 1*y_rep_rep / 100), 2, mean),
+         `1.5` = apply(log(1 + 1.5*y_rep_rep / 100), 2, mean),
+         `2` = apply(log(1 + 2*y_rep_rep / 100), 2, mean),
+         `2.5` = apply(log(1 + 2.5*y_rep_rep / 100), 2, mean),
+         `3` = apply(log(1 + 3*y_rep_rep / 100), 2, mean))
+```
+
+```{r}
+fit <-
+  stan("../stan/stoch_vol_leverage.stan",
+       data = list(T = nrow(spx_train), y = spx_train$pct_return),
+       chains = 1, iter = 1e3)
+
+fit <-
+  stan("../stan/stoch_vol_leverage.stan",
+       data = list(T = nrow(spx), y = spx$pct_return),
+       chains = 4, iter = 2e4, cores = 4,
+       control = list(adapt_delta = 0.99),
+       refresh = 1000)
+
+print(fit, pars = c("mu_ret", "rho", "mu", "phi", "sigma"))
+```
+
