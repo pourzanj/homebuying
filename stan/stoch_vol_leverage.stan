@@ -3,12 +3,12 @@ data {
   vector[T] y;      // mean corrected return at time t
 }
 parameters {
+  real mu_ret;
+  real<lower=-1,upper=1> rho;
+  
   real mu;                     // mean log volatility
   real<lower=-1,upper=1> phi;  // persistence of volatility
   real<lower=0> sigma;         // white noise shock scale
-  
-  real mu_ret;
-  real<lower=-1,upper=1> rho;
   
   vector[T] h_std;             // std log volatility time t
 }
@@ -44,6 +44,9 @@ generated quantities {
   vector[T] eps_rep;
   vector[T] y_rep;
   
+  // standarized error term of data
+  vector[T] eps;
+  
   // Draw h
   h_std_rep[1] = normal_rng(0, 1);
   h_rep[1] = mu + (sigma / sqrt(1 - phi * phi)) * h_std_rep[1];
@@ -59,4 +62,6 @@ generated quantities {
   // Set eps and y
   eps_rep = to_vector(normal_rng(rep_vector(0, T), 1));
   y_rep = m_rep + s_rep .* eps_rep;
+  
+  eps = (y - m_rep) ./ s_rep;
 }
