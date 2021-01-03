@@ -1,0 +1,197 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(tidyquant)
+library(cmdstanr)
+library(posterior)
+library(tibbletime)
+library(plotly)
+library(bayesplot)
+
+holdout_start_date <- ymd("2019-09-01")
+
+spx <-
+  tq_get("^GSPC",
+         get = "stock.prices",
+         from = "2017-09-01",
+         to = "2020-09-01") %>%
+  arrange(date) %>%
+  mutate(pct_return = 100 * (close - lag(close)) / lag(close)) %>%
+  na.omit() %>%
+  mutate(holdout = date > holdout_start_date) %>%
+  group_by(holdout) %>%
+  mutate(holdout_idx = row_number()) %>%
+  ungroup() %>%
+  mutate(holdout_idx = ifelse(holdout, holdout_idx, 0)) %>%
+  # if any returns are exactly zero this causes the lp to evaluate to zero
+  mutate(pct_return = ifelse(pct_return == 0.0, 1e-4, pct_return))
+
+spx_train <- spx %>% filter(!holdout)
+spx_test <- spx %>% filter(holdout)
+
+spx118 <- spx_test %>% filter(date <= ymd("2020-02-20"))
+```
+
+```{r}
+p <- 
+  spx118 %>%
+  ggplot(aes(date, pct_return)) +
+  geom_point() +
+  geom_line()
+
+ggplotly(p, dynamicTicks = TRUE) %>%
+  rangeslider() %>%
+  layout(hovermode = "x")
+```
+
+
+
+```{r}
+model_svl <- cmdstan_model("../stan/stoch_vol_leverage.stan")
+
+dat <- list(T = nrow(spx118), y = spx118$pct_return)
+
+fit <-
+  model_svl$sample(
+    data = dat,
+    seed = 123,
+    iter_warmup = 2e3,
+    iter_sampling = 2e3,
+    chains = 4,
+    parallel_chains = 4,
+    refresh = 300,
+    adapt_delta = 0.999,
+  )
+```
+
+```{r}
+fit$summary(c("mu_ret", "rho", "mu", "phi", "sigma", "lp__"))
+
+par_draws_df <-
+  fit$draws(c("mu_ret", "rho", "mu", "phi", "sigma", "lp__")) %>%
+  as_draws_df()
+
+mcmc_pairs(par_draws_df, pars = c("mu_ret", "rho", "mu", "phi", "sigma", "lp__"),
+           off_diag_args = list(size = 1, alpha = 0.5))
+```
+
+```{r}
+eps_summary <-
+  fit$summary(c("eps")) %>%
+  bind_cols(spx118)
+
+all_summary <-
+  fit$summary(c("eps", "h_rep", "h_std", "s_rep", "m_rep")) %>%
+  select(variable, median) %>%
+  mutate(var = str_extract(variable, "[a-z_]+"),
+         time_id = str_extract(variable, "[0-9]+"),
+         future_id = str_extract(variable, ",[0-9]+")) %>%
+  filter(is.na(future_id) | future_id == ",1") %>%
+  select(-variable, -future_id) %>%
+  pivot_wider(names_from = var, values_from = c(median)) %>%
+  bind_cols(select(spx118, date, pct_return))
+
+p <-
+  all_summary %>%
+  select(date, h_rep, h_std, s_rep, m_rep, pct_return, eps) %>%
+  pivot_longer(-date) %>%
+  ggplot(aes(date, value)) +
+  geom_point() +
+  geom_line() +
+  facet_grid(name ~ ., scales = "free")
+
+ggplotly(p, dynamicTicks = TRUE) %>% layout(hovermode = "x")
+```
+
+```{r}
+p <-
+    all_summary %>%
+    select(date, h_rep, h_std, s_rep, m_rep, pct_return, eps) %>%
+    ggplot(aes(date, pct_return, eps = eps, m = m_rep, s = s_rep, h = h_rep)) +
+    geom_point() +
+    geom_line()
+
+ggplotly(p, dynamicTicks = TRUE) %>% layout(hovermode = "x")
+```
+
+
+```{r}
+eps_par_draws_df <-
+  fit$draws(c("eps", "mu", "phi", "sigma", "lp__")) %>%
+  as_draws_df()
+
+mcmc_pairs(eps_par_draws_df,
+           pars = c("eps[21]", "eps[22]", "mu", "phi", "sigma", "lp__"),
+           off_diag_args = list(size = 1, alpha = 0.5))
+
+s_par_draws_df <-
+  fit$draws(c("s_rep", "mu", "phi", "sigma", "lp__")) %>%
+  as_draws_df()
+
+mcmc_pairs(s_par_draws_df,
+           pars = c("s_rep[21,1]", "s_rep[22,1]", "mu", "phi", "sigma", "lp__"),
+           off_diag_args = list(size = 1, alpha = 0.5))
+```
+
+```{r}
+single_posterior_draws_df <-
+  fit$draws(c("eps", "h_rep", "h_std", "s_rep", "m_rep")) %>%
+  as_draws_df() %>%
+  as_tibble() %>%
+  select(-.chain, -.iteration, -.draw) %>%
+  mutate(sample_id = row_number()) %>%
+  filter(sample_id == 715) %>%
+  pivot_longer(-sample_id) %>%
+  mutate(var = str_extract(name, "[a-z_]+"),
+         time_id = str_extract(name, "[0-9]+"),
+         future_id = str_extract(name, ",[0-9]+")) %>%
+  filter(is.na(future_id) | future_id == ",1") %>%
+  select(-name, -future_id) %>%
+  pivot_wider(names_from = var, values_from = value) %>%
+  bind_cols(select(spx118, date, pct_return))
+
+single_posterior_draws_df %>%
+  select(date, h_rep, h_std, s_rep, m_rep, pct_return, eps) %>%
+  pivot_longer(-date) %>%
+  ggplot(aes(date, value)) +
+  geom_point() +
+  geom_line() +
+  facet_grid(name ~ ., scales = "free")
+```
+
+```{r}
+mu <- -1.07
+phi <- 0.939
+sigma <- 0.319
+sigma2 <- 0.5
+
+v_process <- rnorm(118)
+h_process <- rep(sigma*v_process[1]/sqrt(1-phi^2), 118)
+v_process2 <- rnorm(118)*sigma2
+
+for(t in 2:118) {
+  h_process[t] <- mu + phi*(h_process[t-1]-mu) + sigma*v_process[t]
+}
+
+h_draws_vec <-
+  fit$draws(c("h")) %>%
+  as_draws_df() %>%
+  select(-.chain, -.iteration, -.draw) %>%
+  sample_n(1) %>%
+  as.matrix() %>%
+  as.vector()
+
+spx118 %>%
+  mutate(h_process, h_post_draw = h_draws_vec) %>%
+  select(date, h_process, h_post_draw) %>%
+  pivot_longer(-date) %>%
+  ggplot(aes(date, value, color = name)) +
+  geom_point() +
+  geom_line()
+```
+
