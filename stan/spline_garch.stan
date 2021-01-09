@@ -43,13 +43,13 @@ functions {
   }
 }
 data {
-  int<lower=0> T;
-  real y[T];
+  int<lower=0> T;        // number of time points
+  real y[T];             // returns
   real<lower=0> sigma1;
   
   int K;                 // num of knots
   vector[K] k;           // the sequence of knots
-  int order;        
+  int order;             // order of the B-Spline
 }
 transformed data {
   int degree = order - 1;
@@ -57,31 +57,37 @@ transformed data {
   vector[T] ones = rep_vector(1.0, T);
 }
 parameters {
-  real mu;
+  real mu;         // mean of returns
   
-  real alpha0;
-  vector[H] alpha;
-  real beta;
+  real alpha0;     // intercept
+  vector[H] alpha; // spline relating innovations to predicted volatility
+  real beta;       // term relating yesterday's volatility to predicted volatility
 }
 transformed parameters {
   
-  vector[T] h_hat;
-  vector[T] h;        // log of volatility squared (variance)
+  vector[T] h_hat;    // predicted log of volatility squared
+  vector[T] h;        // actual log of volatility squared (variance) (in GARCH it's just equal to h_hat)
   vector[T] sigma;    // volatility (SD of returns)
-  vector[T-1] e;
+  vector[T-1] e;      // innovations in returns normalized by volatility
   matrix[T, H+2] X;   // design matrix
   
+  // Set volatility for time point 1
   h_hat[1] = log(sigma1^2);
   h[1] = h_hat[1];
   sigma[1] = exp(0.5 * h[1]);
   
+  // Set for rest of time points
   for (t in 2:T) {
+    
+    // Get normalized innovation
     e[t-1] = y[t-1] / sigma[t-1];
     
+    // Set design matrix
     X[t, 1] = 1.0;
     X[t, 2:(H+1)] = eval_b_spline_basis(e[t-1], k, order)';
     X[t, H+2] = h[t-1];
 
+    // Get predicted volatility as linear combination of design matrix
     h_hat[t] = X[t,] * append_row(append_row(alpha0, alpha), beta);
     h[t] = h_hat[t];
     sigma[t] = exp(0.5 * h[t]);
