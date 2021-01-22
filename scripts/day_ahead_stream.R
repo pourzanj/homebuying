@@ -16,11 +16,11 @@ kStanModelFile <- "stan/sv.stan"
 
 kOutdir <- "data/sv_with_leverage_01_13_20/"
 
-kTrainStartDate <- "2000-06-01"
+kTrainStartDate <- "1990-06-01"
 kTestEndDate <- "2021-01-13"
 kNumTrainDays <- 126
 
-kNumStanSamples <- 4e3
+kNumStanSamples <- 1e3
 
 kLeverageLevels <- c(0.0, 0.5, 1.0, 2.0, 3.0)
 
@@ -60,32 +60,29 @@ spy <-
 n_test_days <- nrow(spy) - kNumTrainDays
 
 # Initialize data to fill up during sampling
-
-# Matrix of posterior predictive draws for each day
-y_rep_holdout <- matrix(0.0, nrow = kNumStanSamples * 4, ncol = n_test_days)
-
-# Results on test set
-vol <-
-  spy[(kNumTrainDays + 1):nrow(spy),] %>%
-  select(idx, date) %>%
-  mutate(s = 1, k = 0)
-
-test <-
-  spy[(kNumTrainDays + 1):nrow(spy),] %>%
-  select(idx, date, ret_spy = pct_return) %>%
-  mutate(ret_spy3x = 3 * ret_spy, ret_vs = 0,
-         cum_spy = cumprod(1 + ret_spy / 100),
-         cum_spy3x = cumprod(1 + ret_spy3x / 100),
-         cum_vs = 1)
-
-diagnostics <-
-  spy[(kNumTrainDays + 1):nrow(spy),] %>%
-  select(date) %>%
-  mutate(p = 0.5, z = 0, cum_x2 = pchisq(cumsum(z^2), df = row_number()))
-
-parameters <-
-  tibble(date = rep(spy$date[(kNumTrainDays + 1):nrow(spy)], each = kNumStanPars)) %>%
-  mutate(variable = "", q5 = 1, median = 2, q95 = 3)
+# y_rep_holdout <- matrix(0.0, nrow = kNumStanSamples * 4, ncol = n_test_days)
+# 
+# vol <-
+#   spy[(kNumTrainDays + 1):nrow(spy),] %>%
+#   select(idx, date) %>%
+#   mutate(s = 1, k = 0)
+# 
+# test <-
+#   spy[(kNumTrainDays + 1):nrow(spy),] %>%
+#   select(idx, date, ret_spy = pct_return) %>%
+#   mutate(ret_spy3x = 3 * ret_spy, ret_vs = 0,
+#          cum_spy = cumprod(1 + ret_spy / 100),
+#          cum_spy3x = cumprod(1 + ret_spy3x / 100),
+#          cum_vs = 1)
+# 
+# diagnostics <-
+#   spy[(kNumTrainDays + 1):nrow(spy),] %>%
+#   select(date) %>%
+#   mutate(p = 0.5, z = 0, cum_x2 = pchisq(cumsum(z^2), df = row_number()))
+# 
+# parameters <-
+#   tibble(date = rep(spy$date[(kNumTrainDays + 1):nrow(spy)], each = kNumStanPars)) %>%
+#   mutate(variable = "", q5 = 1, median = 2, q95 = 3)
 
 ##############################
 # 3) Main loop
@@ -93,13 +90,13 @@ parameters <-
 
 model <- cmdstan_model(kStanModelFile)
 
-# readRDS(y_rep_holdout, paste0(kOutdir, "y_rep_holdout.RDS"))
-# readRDS(vol, paste0(kOutdir, "vol.RDS"))
-# readRDS(test, paste0(kOutdir, "test.RDS"))
-# readRDS(diagnostics, paste0(kOutdir, "diagnostics.RDS"))
-# readRDS(parameters, paste0(kOutdir, "parameters.RDS"))
+y_rep_holdout <- readRDS(paste0(kOutdir, "y_rep_holdout.RDS"))
+vol <- readRDS(paste0(kOutdir, "vol.RDS"))
+test <- readRDS(paste0(kOutdir, "test.RDS"))
+diagnostics <- readRDS(paste0(kOutdir, "diagnostics.RDS"))
+parameters <- readRDS(paste0(kOutdir, "parameters.RDS"))
 
-for(i in 1:n_test_days) {
+for(i in 4821:n_test_days) {
   
   # Set up train and test data
   train <- spy[i:(i + kNumTrainDays - 1),]
@@ -117,10 +114,10 @@ for(i in 1:n_test_days) {
       data = dat,
       seed = 11112,
       iter_warmup = 1e3,
-      iter_sampling = 0.25*kNumStanSamples,
+      iter_sampling = kNumStanSamples,
       chains = 4,
       parallel_chains = 4,
-      refresh = 1e2,
+      refresh = 5e2,
       max_treedepth = 10,
       adapt_delta = 0.99,
       show_messages = FALSE
@@ -162,7 +159,9 @@ for(i in 1:n_test_days) {
     fit$summary(kStanParNames) %>%
     select(variable, q5, median, q95)
   
-  if(i %% 10) {
+  if(i %% 20 == 1) {
+    dev.off()
+    
     # Make left column plots
     plot1a <-
       qplot(y_rep_holdout[, i], binwidth = 0.1) +
