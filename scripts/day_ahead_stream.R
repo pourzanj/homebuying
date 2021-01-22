@@ -12,13 +12,20 @@ library(gridExtra)
 # Define constants
 ##############################
 
-kTrainStartDate <- "2017-01-01"
-kTestEndDate <- "2021-01-10"
-kNumTrainDays <- 502
+kStanModelFile <- "stan/sv.stan"
+
+kOutdir <- "data/sv_with_leverage_01_13_20/"
+
+kTrainStartDate <- "2000-06-01"
+kTestEndDate <- "2021-01-13"
+kNumTrainDays <- 126
 
 kNumStanSamples <- 4e3
 
 kLeverageLevels <- c(0.0, 0.5, 1.0, 2.0, 3.0)
+
+kStanParNames <- c("mu_ret", "rho", "mu", "phi", "sigma", "lp__")
+kNumStanPars <- length(kStanParNames)
 
 ##############################
 # Define utility functions
@@ -52,7 +59,6 @@ spy <-
 
 n_test_days <- nrow(spy) - kNumTrainDays
 
-
 # Initialize data to fill up during sampling
 
 # Matrix of posterior predictive draws for each day
@@ -78,14 +84,20 @@ diagnostics <-
   mutate(p = 0.5, z = 0, cum_x2 = pchisq(cumsum(z^2), df = row_number()))
 
 parameters <-
-  tibble(date = rep(spy$date[(kNumTrainDays + 1):nrow(spy)], each = 9)) %>%
+  tibble(date = rep(spy$date[(kNumTrainDays + 1):nrow(spy)], each = kNumStanPars)) %>%
   mutate(variable = "", q5 = 1, median = 2, q95 = 3)
 
 ##############################
 # 3) Main loop
 ##############################
 
-model <- cmdstan_model("stan/egarch_random_effects.stan")
+model <- cmdstan_model(kStanModelFile)
+
+# readRDS(y_rep_holdout, paste0(kOutdir, "y_rep_holdout.RDS"))
+# readRDS(vol, paste0(kOutdir, "vol.RDS"))
+# readRDS(test, paste0(kOutdir, "test.RDS"))
+# readRDS(diagnostics, paste0(kOutdir, "diagnostics.RDS"))
+# readRDS(parameters, paste0(kOutdir, "parameters.RDS"))
 
 for(i in 1:n_test_days) {
   
@@ -103,12 +115,12 @@ for(i in 1:n_test_days) {
   fit <-
     model$sample(
       data = dat,
-      seed = 102115,
+      seed = 11112,
       iter_warmup = 1e3,
-      iter_sampling = kNumStanSamples,
+      iter_sampling = 0.25*kNumStanSamples,
       chains = 4,
       parallel_chains = 4,
-      refresh = 1e3,
+      refresh = 1e2,
       max_treedepth = 10,
       adapt_delta = 0.99,
       show_messages = FALSE
@@ -143,117 +155,120 @@ for(i in 1:n_test_days) {
   diagnostics <- mutate(diagnostics, cum_x2 = pchisq(cumsum(z^2), df = row_number()))
   
   # Extract and set parameter summaries
-  par_start_idx <- (i-1)*9 + 1
-  par_end_idx <- par_start_idx + 9 - 1
+  par_start_idx <- (i-1)*kNumStanPars + 1
+  par_end_idx <- par_start_idx + kNumStanPars - 1
   
   parameters[par_start_idx:par_end_idx, 2:5] <-
-    fit$summary(c("mu", "alpha0", "alpha1", "alpha2", "beta1", "c", "rho", "lp__", "h_rep_ahead")) %>%
+    fit$summary(kStanParNames) %>%
     select(variable, q5, median, q95)
   
-  # Make left column plots
-  plot1a <-
-    qplot(y_rep_holdout[, i], binwidth = 0.1) +
-    geom_vline(xintercept = actual_return, color = "red") +
-    xlab(paste("SPX Percent Return", spy$date[i + kNumTrainDays])) +
-    labs(title = "SPX LFO Predicted Return Vs. Actual",
-         subtitle = paste(paste("Day", i, "/", n_test_days),
-                          paste("Pct. Ret.:", round(actual_return, 2)),
-                          paste("P-val:", round(diagnostics$p[i], 4)),
-                          paste("Z-score:", round(diagnostics$z[i], 2)),
-                          paste("Opt. Lev:", vol$k[i]),
-                         sep = " // "))
+  if(i %% 10) {
+    # Make left column plots
+    plot1a <-
+      qplot(y_rep_holdout[, i], binwidth = 0.1) +
+      geom_vline(xintercept = actual_return, color = "red") +
+      xlab(paste("SPX Percent Return", spy$date[i + kNumTrainDays])) +
+      labs(title = "SPX LFO Predicted Return Vs. Actual",
+           subtitle = paste(paste("Day", i, "/", n_test_days),
+                            paste("Pct. Ret.:", round(actual_return, 2)),
+                            paste("P-val:", round(diagnostics$p[i], 4)),
+                            paste("Z-score:", round(diagnostics$z[i], 2)),
+                            paste("Opt. Lev:", vol$k[i]),
+                            sep = " // "))
+    
+    plot1b <-
+      tibble(k = kLeverageLevels, expec_ann_returns) %>%
+      ggplot(aes(k, expec_ann_returns)) +
+      geom_point() +
+      geom_line() +
+      xlab("Leverave Level (k)") +
+      ylab("Expected Annual Return") +
+      labs(title = "Returs vs. Leverage Level")
+    
+    # Make middle column plots
+    plot2a <-
+      vol %>%
+      head(i) %>%
+      select(-idx) %>%
+      pivot_longer(-date) %>%
+      mutate(name = factor(name, levels = c("s", "k"))) %>%
+      ggplot(aes(date, value)) +
+      geom_point() +
+      geom_line() +
+      facet_grid(name ~ ., scales = "free") +
+      labs(title = "SD and Opt. Lev. (k) Over Time")
+    
+    plot2b <-
+      diagnostics %>%
+      head(i) %>%
+      select(-p) %>%
+      pivot_longer(-date) %>%
+      ggplot(aes(date, value)) +
+      geom_point() +
+      geom_line() +
+      facet_grid(name ~ ., scales = "free") +
+      labs(title = "Z-Scores and Cum. X^2 Quantiles Over Time")
+    
+    # Make third column plots
+    plot3a <-
+      test %>%
+      head(i) %>%
+      select(date, ret_spy, ret_spy3x, ret_vs) %>%
+      pivot_longer(-date) %>%
+      ggplot(aes(value, fill = name)) +
+      geom_histogram() +
+      facet_grid(name ~ .) +
+      labs(title = "Hist. of Daily Returns")
+    
+    plot3b <-
+      test %>%
+      head(i) %>%
+      select(-idx) %>%
+      pivot_longer(-date) %>%
+      mutate(strat = str_extract(name, "(?<=_).*"),
+             var = str_extract(name, "^.*(?=(_))")) %>%
+      filter(!(strat == "spy3x" && var == "ret")) %>%
+      select(-name) %>%
+      ggplot(aes(date, value, color = strat)) +
+      geom_line() +
+      facet_grid(var ~ ., scales = "free") +
+      labs(title = "Daily and Cum. Returns")
+    
+    plot3c <-
+      test %>%
+      head(i) %>%
+      ggplot(aes(ret_spy, ret_vs)) +
+      geom_abline(slope = 1, intercept = 0) +
+      geom_abline(slope = 3, intercept = 0) +
+      geom_point() +
+      labs(title = "Daily Returns of VS vs. SPY")
+    
+    # Make 4th column plots
+    plot4a <-
+      parameters %>%
+      head(i*kNumStanPars) %>%
+      ggplot(aes(date, median)) +
+      geom_point() +
+      geom_errorbar(aes(ymin = q5, ymax = q95)) +
+      facet_grid(variable ~ ., scales = "free") +
+      labs(title = "Model Parameter Posterior Intervals Over Time")
+    
+    # Plot all together
+    grid.arrange(grid.arrange(plot1a, plot1b, ncol = 1),
+                 grid.arrange(plot2a, plot2b, ncol = 1),
+                 grid.arrange(plot3a, plot3b, plot3c, ncol = 1),
+                 grid.arrange(plot4a, ncol = 1),
+                 nrow = 1)
+    
+    # Save stanfit and intermediary data
+    saveRDS(y_rep_holdout, paste0(kOutdir, "y_rep_holdout.RDS"))
+    saveRDS(vol, paste0(kOutdir, "vol.RDS"))
+    saveRDS(test, paste0(kOutdir, "test.RDS"))
+    saveRDS(diagnostics, paste0(kOutdir, "diagnostics.RDS"))
+    saveRDS(parameters, paste0(kOutdir, "parameters.RDS"))
+  }
   
-  plot1b <-
-    tibble(k = kLeverageLevels, expec_ann_returns) %>%
-    ggplot(aes(k, expec_ann_returns)) +
-    geom_point() +
-    geom_line() +
-    xlab("Leverave Level (k)") +
-    ylab("Expected Annual Return") +
-    labs(title = "Returs vs. Leverage Level")
-  
-  # Make middle column plots
-  plot2a <-
-    vol %>%
-    head(i) %>%
-    select(-idx) %>%
-    pivot_longer(-date) %>%
-    mutate(name = factor(name, levels = c("s", "k"))) %>%
-    ggplot(aes(date, value)) +
-    geom_point() +
-    geom_line() +
-    facet_grid(name ~ ., scales = "free") +
-    labs(title = "Returns vs. Leverage Level")
-  
-  plot2b <-
-    diagnostics %>%
-    head(i) %>%
-    select(-p) %>%
-    pivot_longer(-date) %>%
-    ggplot(aes(date, value)) +
-    geom_point() +
-    geom_line() +
-    facet_grid(name ~ ., scales = "free") +
-    labs(title = "Predicted SD and Optimal Leverage (k) Over Time")
-  
-  # Make third column plots
-  plot3a <-
-    test %>%
-    head(i) %>%
-    select(date, ret_spy, ret_spy3x, ret_vs) %>%
-    pivot_longer(-date) %>%
-    ggplot(aes(value, fill = name)) +
-    geom_histogram() +
-    facet_grid(name ~ .) +
-    labs(title = "Hist. of Daily Returns")
-  
-  plot3b <-
-    test %>%
-    head(i) %>%
-    select(-idx) %>%
-    pivot_longer(-date) %>%
-    mutate(strat = str_extract(name, "(?<=_).*"),
-           var = str_extract(name, "^.*(?=(_))")) %>%
-    filter(!(strat == "spy3x" && var == "ret")) %>%
-    select(-name) %>%
-    ggplot(aes(date, value, color = strat)) +
-    geom_line() +
-    facet_grid(var ~ ., scales = "free") +
-    labs(title = "Daily and Cum. Returns")
-  
-  plot3c <-
-    test %>%
-    head(i) %>%
-    ggplot(aes(ret_spy, ret_vs)) +
-    geom_abline(slope = 1, intercept = 0) +
-    geom_abline(slope = 3, intercept = 0) +
-    geom_point() +
-    labs(title = "Daily Returns of VS vs. SPY")
-  
-  # Make 4th column plots
-  plot4a <-
-    parameters %>%
-    head(i*8) %>%
-    ggplot(aes(date, median)) +
-    geom_point() +
-    geom_errorbar(aes(ymin = q5, ymax = q95)) +
-    facet_grid(variable ~ ., scales = "free") +
-    labs(title = "Model Parameter Posterior Intervals Over Time")
-  
-  # Plot all together
-  grid.arrange(grid.arrange(plot1a, plot1b, ncol = 1),
-               grid.arrange(plot2a, plot2b, ncol = 1),
-               grid.arrange(plot3a, plot3b, plot3c, ncol = 1),
-               grid.arrange(plot4a, ncol = 1),
-               nrow = 1)
-  
-  # Save stanfit and intermediary data
-  # fit$save_object(file = paste0("data/run_01_10_20/fits/fit_", i, ".rds"))
-  saveRDS(y_rep_holdout, "data/run_01_10_20/y_rep_holdout.RDS")
-  saveRDS(vol, "data/run_01_10_20/vol.RDS")
-  saveRDS(test, "data/run_01_10_20/test.RDS")
-  saveRDS(diagnostics, "data/run_01_10_20/diagnostics.RDS")
-  saveRDS(parameters, "data/run_01_10_20/parameters.RDS")
+
 }
 
 
