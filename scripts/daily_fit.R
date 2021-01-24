@@ -110,10 +110,22 @@ main <- function() {
           "Expected annualized return:", round(max_expec_ann_returns, 2))
   
   tw_send_message(
-    to = "+15626739913",
+    to = Sys.getenv("A_PN"),
     from = "+18722405834",
     body = body
   )
+  
+  # tw_send_message(
+  #   to = Sys.getenv("J_PN"),
+  #   from = "+18722405834",
+  #   body = body
+  # )
+  # 
+  # tw_send_message(
+  #   to = Sys.getenv("C_PN"),
+  #   from = "+18722405834",
+  #   body = body
+  # )
 }
 
 if (sys.nframe() == 0) {
