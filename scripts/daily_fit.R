@@ -7,7 +7,7 @@ library(posterior)
 library(twilio)
 
 # Define Constants
-kStanModelFile <- "stan/sv.stan"
+kStanModelFile <- "homebuying/stan/sv.stan"
 kNumTrainMonths <- 6
 kNumTrainDays <- 126
 
@@ -115,17 +115,17 @@ main <- function() {
     body = body
   )
   
-  # tw_send_message(
-  #   to = Sys.getenv("J_PN"),
-  #   from = "+18722405834",
-  #   body = body
-  # )
-  # 
-  # tw_send_message(
-  #   to = Sys.getenv("C_PN"),
-  #   from = "+18722405834",
-  #   body = body
-  # )
+  tw_send_message(
+    to = Sys.getenv("J_PN"),
+    from = "+18722405834",
+    body = body
+  )
+
+  tw_send_message(
+    to = Sys.getenv("C_PN"),
+    from = "+18722405834",
+    body = body
+  )
 }
 
 if (sys.nframe() == 0) {
