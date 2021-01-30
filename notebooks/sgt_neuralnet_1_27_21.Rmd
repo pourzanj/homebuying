@@ -328,6 +328,7 @@ tibble(lag_01 = x_grid[,1]) %>%
   bind_cols(as_tibble(grid_pred)) %>%
   ggplot(aes(lag_01, V1)) + 
   geom_line()
+
 ```
 
 
