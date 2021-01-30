@@ -1,0 +1,3 @@
+# Send daily fit at 3:30 and 3:45 EST
+30 15 * * 1-5 Rscript /home/arya/homebuying/scripts/daily_fit.R
+45 15 * * 1-5 Rscript /home/arya/homebuying/scripts/daily_fit.R

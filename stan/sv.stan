@@ -28,6 +28,7 @@ transformed parameters {
 }
 model {
   // prior
+  mu_ret ~ normal(0, 0.2);
   rho ~ normal(-1, 1);
 
   (phi+1)/2.0 ~ beta(8, 2);
