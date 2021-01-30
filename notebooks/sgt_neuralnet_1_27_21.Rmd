@@ -3,6 +3,11 @@ title: "R Notebook"
 output: html_notebook
 ---
 
+References
+https://medium.com/hal24k-techblog/a-guide-to-generating-probability-distributions-with-neural-networks-ffc4efacd6a4
+https://www.tensorflow.org/tutorials/keras/overfit_and_underfit
+https://machinelearningmastery.com/cnn-models-for-human-activity-recognition-time-series-classification/
+
 # Set up Data
 
 ```{r}
