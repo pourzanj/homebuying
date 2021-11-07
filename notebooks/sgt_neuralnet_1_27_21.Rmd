@@ -1,0 +1,457 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+References
+https://medium.com/hal24k-techblog/a-guide-to-generating-probability-distributions-with-neural-networks-ffc4efacd6a4
+https://www.tensorflow.org/tutorials/keras/overfit_and_underfit
+https://machinelearningmastery.com/cnn-models-for-human-activity-recognition-time-series-classification/
+
+# Set up Data
+
+```{r}
+library(tidyverse)
+library(tidyquant)
+library(reticulate)
+
+spy <-
+  tq_get(c("^GSPC"),
+         get = "stock.prices",
+         from = "1928-01-03",
+         to = "2021-01-27") %>%
+  arrange(date) %>%
+  mutate(pct_return = 100 * (close - lag(close)) / lag(close)) %>%
+  # if any returns are exactly zero this causes the lp to evaluate to zero
+  #mutate(pct_return = ifelse(pct_return == 0.0, 1e-4, pct_return)) %>%
+  na.omit() %>%
+  mutate(year = year(date), week = isoweek(date), weekday = weekdays(date)) %>%
+  mutate(year = ifelse(month(date) == 12 & week == 1, year + 1, year)) %>%
+  mutate(new_week = week != lag(week))
+
+
+create_lagged_design_matrix <- function(df, nlags) {
+  lags <- seq(nlags)
+  lag_names <- paste("lag", formatC(lags, width = nchar(max(lags)), flag = "0"), sep = "_")
+  lag_functions <- setNames(paste("dplyr::lag(., ", lags, ")"), lag_names)
+  
+  df %>% mutate_at(vars(y), funs_(lag_functions))
+}
+
+train <-
+  spy %>%
+  filter(date <= ymd("2020-01-01")) %>%
+  select(y = pct_return) %>%
+  create_lagged_design_matrix(nlags = 20) %>%
+  na.omit()
+
+test <-
+  spy %>%
+  filter(date >= ymd("2019-01-01")) %>%
+  select(y = pct_return) %>%
+  create_lagged_design_matrix(nlags = 20) %>%
+  na.omit()
+
+x_train <- train %>% select(-y) %>% as.matrix()
+y_train <- train$y
+
+x_test <- test %>% select(-y) %>% as.matrix()
+y_test <- test$y
+
+
+
+x_train_weekday <-
+  spy %>%
+  filter(date <= ymd("2020-01-01")) %>%
+  select(y = pct_return, weekday) %>%
+  mutate(weekday = factor(weekday)) %>%
+  tail(nrow(x_train))
+x_train_weekday <- model.matrix(y ~ weekday - 1, x_train_weekday)
+
+x_test_weekday <-
+  spy %>%
+  filter(date >= ymd("2019-01-01")) %>%
+  select(y = pct_return, weekday) %>%
+  mutate(weekday = factor(weekday)) %>%
+  tail(nrow(x_test))
+x_test_weekday <- model.matrix(y ~ weekday - 1, x_test_weekday)
+
+
+x_grid <-
+  expand.grid(y1 = seq(-3, 3, by = 0.1), y2 = seq(-3, 3, by = 0.1)) %>%
+  as_tibble() %>%
+  as.matrix()
+
+
+grid_past <- test %>% mutate(date = d) %>% filter(date == ymd("2020-02-21")) %>% select(-y, -date,-lag_01)
+x_grid <- crossing(lag_01 = seq(-5, 5, by = 0.1), grid_past) %>% as.matrix()
+```
+
+```{python}
+import tensorflow as tf
+import numpy as np
+
+x_train = r.x_train
+y_train = np.asarray(r.y_train)
+
+x_test = r.x_test
+y_test = np.asarray(r.y_test)
+
+x_train_weekday = r.x_train_weekday
+x_test_weekday = r.x_test_weekday
+
+x_grid = r.x_grid
+```
+
+# Define Distribution Layers
+
+```{python}
+def gaussian_layer(x):
+
+    # Get the number of dimensions of the input
+    num_dims = len(x.get_shape())
+    
+    # Separate the parameters
+    m, s = tf.unstack(x, num=2, axis=-1)
+    
+    # Add one dimension to make the right shape
+    m = tf.expand_dims(m, -1)
+    s = tf.expand_dims(s, -1)
+        
+    # Apply a softplus to make positive
+    s = tf.keras.activations.softplus(s)
+
+    # Join back together again
+    out_tensor = tf.concat((m, s), axis=num_dims-1)
+
+    return out_tensor
+  
+def sgt_layer(x):
+
+    # Get the number of dimensions of the input
+    num_dims = len(x.get_shape())
+    
+    # Separate the parameters
+    m, s, l, p, q = tf.unstack(x, num=5, axis=-1)
+    
+    # Add one dimension to make the right shape
+    m = tf.expand_dims(m, -1)
+    s = tf.expand_dims(s, -1)
+    l = tf.expand_dims(l, -1)
+    p = tf.expand_dims(p, -1)
+    q = tf.expand_dims(q, -1)
+        
+    # Apply a softplus to make positive
+    s = tf.keras.activations.softplus(s)
+    l = tf.keras.activations.tanh(l)
+    p = 1.0 + tf.keras.activations.softplus(p)
+    q = 0.2 + tf.keras.activations.softplus(q)
+
+    # Join back together again
+    out_tensor = tf.concat((m, s, l, p, q), axis=num_dims-1)
+
+    return out_tensor
+```
+
+
+# Define Loss Functions
+
+```{python}
+def gaussian_loss(y_true, y_pred):
+
+    # Separate the parameters
+    m, s = tf.unstack(y_pred, num=2, axis=-1)
+    
+    # Add one dimension to make the right shape
+    m = tf.expand_dims(m, -1)
+    s = tf.expand_dims(s, -1)
+    
+    # Calculate the negative log likelihood
+    nll = (
+        tf.math.log(s)
+        + 0.5 * tf.math.square((y_true - m) / s)
+    )
+    
+    return nll
+  
+def sgt_loss(y_true, y_pred):
+
+    # Separate the parameters
+    m, s, l, p, q = tf.unstack(y_pred, num=5, axis=-1)
+    
+    # Add one dimension to make the right shape
+    m = tf.expand_dims(m, -1)
+    s = tf.expand_dims(s, -1)
+    l = tf.expand_dims(l, -1)
+    p = tf.expand_dims(p, -1)
+    q = tf.expand_dims(q, -1)
+    
+    # Calculate the negative log likelihood
+    nll = (
+        - tf.math.log(p)
+        + tf.math.log(2.0*s)
+        + (1.0/p) * tf.math.log(q)
+        + (tf.math.lgamma(1/p) + tf.math.lgamma(q) - tf.math.lgamma(1.0/p + q))
+        + (1.0/p+q)
+        * tf.math.log(
+            1.0 + tf.math.pow(tf.math.abs(y_true-m), p)
+            / (q * tf.math.pow(s, p) * tf.math.pow(l*tf.math.sign(y_true-m) + 1.0, p))
+          )
+    )
+    
+    return nll
+```
+
+
+```{python}
+y_pred = tf.constant([0.1, 1.0, 0.2, 1.5, 100.0])
+y_true = tf.constant([-1.0])
+
+p = sgt_loss(y_true, y_pred)
+
+sess = tf.compat.v1.Session()
+p.eval(session=sess)
+```
+
+```{r}
+dsgt_test <- function(x, m, s, l, p, q) {
+  - log(p) + log(2*s) + (1/p) * log(q) + (lgamma(1/p) + lgamma(q) - lgamma(1/p + q)) + (1.0/p+q) * log(1 + abs(x - m)^p / (q * s^p * (l*sign(x-m) + 1)^p))
+}
+
+dsgt_test(-1, 0, 1, 0.2, 1.5, 100)
+
+dsgt(-1, mu = 0.1, sigma = 1, lambda = 0.2, p = 1.5, q = 100, mean.cent = FALSE, var.adj = FALSE, log = TRUE)
+```
+
+
+# Gaussian
+
+
+```{python}
+from tensorflow.keras.layers import Lambda
+
+tf.keras.backend.clear_session()
+
+model = tf.keras.models.Sequential()
+model.add(tf.keras.layers.Conv1D(filters=128, kernel_size=5, input_shape=(20,1), kernel_regularizer=tf.keras.regularizers.l1_l2(l1=1e-5, l2=1e-4)))
+model.add(tf.keras.layers.MaxPooling1D(pool_size=5))
+model.add(tf.keras.layers.Flatten())
+# model.add(tf.keras.layers.Dense(512, kernel_regularizer=tf.keras.regularizers.l1_l2(l1=1e-5, l2=1e-4), activation='elu', input_dim=20))
+# model.add(tf.keras.layers.Dropout(.5, ))
+model.add(tf.keras.layers.Dense(512,kernel_regularizer=tf.keras.regularizers.l1_l2(l1=1e-5, l2=1e-4), activation='elu'))
+model.add(tf.keras.layers.Dropout(.5, ))
+model.add(tf.keras.layers.Dense(128,kernel_regularizer=tf.keras.regularizers.l1_l2(l1=1e-5, l2=1e-4), activation='elu'))
+model.add(tf.keras.layers.Dropout(.5, ))
+model.add(tf.keras.layers.Dense(5, activation='linear'))
+model.add(Lambda(sgt_layer))
+
+# The lambda function is used to input the quantile value to the quantile
+# regression loss function. Keras only allows two inputs in user-defined loss
+# functions, predictions and actual values.
+model.compile(optimizer='adam', loss=sgt_loss)
+
+history = model.fit(x_train[..., np.newaxis], y_train, epochs = 20, validation_data = (x_test[..., np.newaxis], y_test))
+#history = model.fit(x_train, y_train, epochs = 20, validation_data = (x_test, y_test))
+  
+pred = model.predict(x_test[..., np.newaxis])                  
+grid_pred = model.predict(x_grid[..., np.newaxis])
+```
+
+
+```{python}
+tf.keras.backend.clear_session()
+
+# head 1
+inputs1 = tf.keras.layers.Input(shape=(20,1))
+conv1 = tf.keras.layers.Conv1D(filters=64, kernel_size=3, activation='relu')(inputs1)
+drop1 = tf.keras.layers.Dropout(0.5)(conv1)
+pool1 = tf.keras.layers.MaxPooling1D(pool_size=2)(drop1)
+flat1 = tf.keras.layers.Flatten()(pool1)
+
+# head 2
+inputs2 = tf.keras.layers.Input(shape=(20,1))
+conv2 = tf.keras.layers.Conv1D(filters=64, kernel_size=5, activation='relu')(inputs2)
+drop2 = tf.keras.layers.Dropout(0.5)(conv2)
+pool2 = tf.keras.layers.MaxPooling1D(pool_size=2)(drop2)
+flat2 = tf.keras.layers.Flatten()(pool2)
+
+# head 3
+inputs3 = tf.keras.layers.Input(shape=(20,1))
+dense3a = tf.keras.layers.Dense(64, kernel_regularizer=tf.keras.regularizers.l1_l2(l1=1e-5, l2=1e-4), activation='relu')(inputs3)
+drop3a = tf.keras.layers.Dropout(0.5)(dense3a)
+dense3b = tf.keras.layers.Dense(64, kernel_regularizer=tf.keras.regularizers.l1_l2(l1=1e-5, l2=1e-4), activation='relu')(drop3a)
+drop3b = tf.keras.layers.Dropout(0.5)(dense3b)
+flat3 = tf.keras.layers.Flatten()(drop3b)
+
+# head 4
+inputs4 = tf.keras.layers.Input(shape=(5,1))
+flat4 = tf.keras.layers.Flatten()(inputs4)
+
+# merge
+merged = tf.keras.layers.Concatenate(axis=1)([flat1, flat2, flat3, flat4])
+
+# interpretation
+densei1 = tf.keras.layers.Dense(64, kernel_regularizer=tf.keras.regularizers.l1_l2(l1=1e-5, l2=1e-4), activation='relu')(merged)
+dropi1 = tf.keras.layers.Dropout(0.5)(densei1)
+densei2 = tf.keras.layers.Dense(5, kernel_regularizer=tf.keras.regularizers.l1_l2(l1=1e-5, l2=1e-4), activation='linear')(dropi1)
+outputs = Lambda(sgt_layer)(densei2)
+	
+model = tf.keras.Model(inputs=[inputs1, inputs2, inputs3, inputs4], outputs=outputs)
+model.compile(optimizer='adam', loss=sgt_loss)
+
+x_train_cnn = x_train[..., np.newaxis]
+x_test_cnn = x_test[..., np.newaxis]
+x_train_weekday_cnn = x_train_weekday[..., np.newaxis]
+x_test_weekday_cnn = x_test_weekday[..., np.newaxis]
+
+history = model.fit([x_train_cnn, x_train_cnn, x_train_cnn, x_train_weekday_cnn], y_train, epochs = 20, validation_data = ([x_test_cnn, x_test_cnn, x_test_cnn, x_test_weekday_cnn], y_test))
+
+x_grid_cnn = x_grid[..., np.newaxis]
+pred = model.predict([x_test_cnn, x_test_cnn, x_test_cnn, x_test_weekday_cnn])                  
+grid_pred = model.predict([x_grid_cnn, x_grid_cnn, x_grid_cnn])
+```
+
+
+```{r}
+grid_pred <- py$grid_pred
+
+x_grid %>%
+  as_tibble() %>%
+  bind_cols(as_tibble(grid_pred)) %>%
+  ggplot(aes(y1, y2)) +
+  geom_tile(aes(fill = V1)) +
+  scale_fill_gradientn(colors = rainbow(5))
+
+x_grid %>%
+  as_tibble() %>%
+  bind_cols(as_tibble(grid_pred)) %>%
+  ggplot(aes(y1, y2)) +
+  geom_tile(aes(fill = V2)) +
+  scale_fill_gradientn(colors = rainbow(5))
+
+tibble(lag_01 = x_grid[,1]) %>%
+  bind_cols(as_tibble(grid_pred)) %>%
+  ggplot(aes(lag_01, V1)) + 
+  geom_line()
+
+```
+
+
+```{r}
+pred <- py$pred
+
+test %>%
+  bind_cols(as_tibble(pred)) %>%
+  mutate(t = row_number()) %>%
+  mutate(ql = qsgt(0.025, mu = V1, sigma = V2, lambda = V3, p = V4, q = V5, mean.cent = FALSE, var.adj = FALSE),
+         qu = qsgt(0.975, mu = V1, sigma = V2, lambda = V3, p = V4, q = V5, mean.cent = FALSE, var.adj = FALSE)) %>%
+  mutate(yint = ql < y & y < qu) %>%
+  pull(yint) %>%
+  mean()
+
+test %>%
+  bind_cols(as_tibble(pred)) %>%
+  mutate(t = row_number()) %>%
+  mutate(ql = qsgt(0.025, mu = V1, sigma = V2, lambda = V3, p = V4, q = V5, mean.cent = FALSE, var.adj = FALSE),
+         qu = qsgt(0.975, mu = V1, sigma = V2, lambda = V3, p = V4, q = V5, mean.cent = FALSE, var.adj = FALSE)) %>%
+  mutate(yint = ql < y & y < qu) %>%
+  ggplot(aes(t, y)) +
+  geom_errorbar(aes(ymin = ql, ymax = qu), alpha = 0.3) +
+  geom_point(aes(color = yint))
+
+test %>%
+  select(y) %>%
+  bind_cols(as_tibble(pred)) %>%
+  mutate(t = row_number()) %>%
+  pivot_longer(-t) %>%
+  ggplot(aes(t, value)) +
+  geom_line() +
+  facet_grid(name ~ ., scales = "free")
+
+test %>%
+  select(lag_01) %>%
+  bind_cols(as_tibble(pred)) %>%
+  mutate(lag_01 = lag_01 / V2) %>%
+  mutate_at(c("V1", "V2", "V3", "V4", "V5"), function(x) x - lag(x)) %>%
+  pivot_longer(-lag_01) %>%
+  ggplot(aes(lag_01, value)) +
+  geom_point() +
+  facet_grid(. ~ name, scales = "free")
+
+tibble(x = seq(-20, 20, by = 0.1), y = dsgt(x, mu = 0.0892, sigma = 5.59, lambda = 0.116, p = 1.88, q = 2, mean.cent = FALSE, var.adj = FALSE)) %>% ggplot(aes(x,y)) + geom_line()
+```
+
+
+
+```{r}
+get_ann_ret_mc <- function(k, m, s, l, p, q) {
+  r <- rsgt(1e4, m, s, l, p, q, mean.cent = FALSE, var.adj = FALSE)
+  log_expec_r <- mean(log(1 + k * r/100))
+  if(is.nan(log_expec_r)) {
+    return(NA_real_)
+  } else{
+    return(log_expec_r)
+  }
+}
+
+get_opt_k_mc <- function(m, s, l, p, q) {
+  log_expec_r <- map_dbl(k, get_ann_ret_mc, m = m, s = s, l = l, p = p, q = q)
+  k[which(log_expec_r == max(log_expec_r, na.rm = TRUE))]
+}
+
+get_opt_k_mc(0.19, 0.816, -0.0338, 1.93, 1.95)
+
+k <- c(0, 0.5, 1, 2, 3)
+ks <- as_tibble(pred) %>% set_names(c("m", "s", "l", "p", "q")) %>% pmap_dbl(get_opt_k_mc)
+
+
+
+get_ann_ret <- function(k, m, s, l, p, q) {
+  lower <- qsgt(0.001, m, s, l, p, q, mean.cent = FALSE, var.adj = FALSE)
+  upper <- qsgt(0.999, m, s, l, p, q, mean.cent = FALSE, var.adj = FALSE)
+  
+  log_expec_ret <- -Inf
+  
+  pr <- function(x) dsgt(x, m, s, l, p, q, mean.cent = FALSE, var.adj = FALSE)
+  if(k >= 0 & k*lower > -100) {
+    log_expec_ret <- integrate(function(r) log(1 + k*r/100) * pr(r), lower, upper)$value
+  } else if(k < 0 & k*upper > -100) {
+    log_expec_ret <- integrate(function(r) log(1 + k*r/100) * pr(r), lower, upper)$value
+  }
+  
+  log_expec_ret
+}
+
+get_opt_k <- function(m, s, l, p, q) {
+  log_expec_r <- map_dbl(k, get_ann_ret, m = m, s = s, l = l, p = p, q = q)
+  k[which(log_expec_r == max(log_expec_r, na.rm = TRUE))]
+}
+
+ks <- as_tibble(pred) %>% set_names(c("m", "s", "l", "p", "q")) %>% pmap_dbl(get_opt_k)
+```
+
+```{r}
+test %>%
+  select(y) %>%
+  bind_cols(as_tibble(pred)) %>%
+  mutate(t = d) %>%
+  mutate(k = ks) %>%
+  mutate(vs = y*k) %>%
+  filter(year(t) >= 2020) %>%
+  mutate(r = cumprod(1+vs/100)) %>%
+  pivot_longer(-t) %>%
+  ggplot(aes(t, value)) +
+  geom_line() +
+  facet_grid(name ~ ., scales = "free")
+```
+
+```{r}
+k_smooth <- ks
+for(i in 2:length(ks)) {
+  if(ks[i] == 3 & ks[i] != ks[i-1]) {
+    k_smooth[i] <- 0
+  } 
+}
+```
+
+
