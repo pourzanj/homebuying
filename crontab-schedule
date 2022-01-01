@@ -1,3 +1,5 @@
+# Temporary for use with run-as-cron
+* * * * *   /usr/bin/env > /home/username/tmp/cron-env
 # Send daily fit at 3:30 and 3:45 EST
-30 15 * * 1-5 Rscript /home/arya/homebuying/scripts/daily_fit.R
-45 15 * * 1-5 Rscript /home/arya/homebuying/scripts/daily_fit.R
+40 15 * * 1-5 Rscript /home/arya/homebuying/scripts/daily_fit.R 2>&1 > cron.log
+50 15 * * 1-5 Rscript /home/arya/homebuying/scripts/daily_fit.R 2>&1 >> cron.log

@@ -108,13 +108,13 @@ main <- function() {
           "Optimal leverage for tomorrow:", opt_k,
           "\n",
           "Expected annualized return:", round(max_expec_ann_returns, 2))
-  
+
   tw_send_message(
     to = Sys.getenv("A_PN"),
     from = "+18722405834",
     body = body
   )
-  
+
   tw_send_message(
     to = Sys.getenv("J_PN"),
     from = "+18722405834",
@@ -123,6 +123,18 @@ main <- function() {
 
   tw_send_message(
     to = Sys.getenv("C_PN"),
+    from = "+18722405834",
+    body = body
+  )
+  
+  tw_send_message(
+    to = Sys.getenv("T_PN"),
+    from = "+18722405834",
+    body = body
+  )
+  
+  tw_send_message(
+    to = Sys.getenv("D_PN"),
     from = "+18722405834",
     body = body
   )
