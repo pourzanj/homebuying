@@ -38,7 +38,33 @@ vix %>%
   ggplot(aes(date, h_rep)) +
   geom_line()
 
+# Simulate crossing in an AR1
+N <- 5286
 
+sim_ar1 <- function(draw, phi) {
+  v <- rnorm(N)
+  h <- rep(0, N)
+  h[1] <- v[1]
+  for(n in 2:N) {
+    h[n] <- phi*h[n-1] + sqrt(1-phi^2)*v[n]
+  }
+  
+  tibble(draw, i = 1:N, h)
+}
 
+get_crossings <- function(h) {
+  tibble(h) %>%
+    mutate(gt0 = h > 0, change = gt0 != lag(gt0)) %>%
+    na.omit() %>%
+    pull(change) %>%
+    sum()
+}
+
+crossings <-
+  map_dfr(1:1e3, sim_ar1, phi = 0.94) %>%
+  group_by(draw) %>%
+  summarize(crossings = get_crossings(h))
+
+crossings %>% ggplot(aes(crossings)) + geom_histogram()
 
 
