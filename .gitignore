@@ -5,3 +5,4 @@
 data/*
 stan/*
 !stan/*.*
+.secret

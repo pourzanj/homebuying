@@ -1,10 +1,13 @@
 #!/usr/bin/env Rscript
 
-library(tidyverse)
+library(dplyr)
+library(purrr)
 library(tidyquant)
 library(cmdstanr)
 library(posterior)
-library(twilio)
+# library(twilio)
+# library(gmailr)
+library(discordr)
 
 # Define Constants
 kStanModelFile <- "homebuying/stan/sv.stan"
@@ -35,7 +38,7 @@ main <- function() {
   # Get previous days
   spy <-
     tq_get(c("SPY"),
-           get = "stock.prices",
+           get = "tiingo",
            from = kTodaysDate - kNumCalendarTrainDays,
            to = kTodaysDate) %>%
     arrange(date) %>%
@@ -109,35 +112,62 @@ main <- function() {
           "\n",
           "Expected annualized return:", round(max_expec_ann_returns, 2))
 
-  tw_send_message(
-    to = Sys.getenv("A_PN"),
-    from = "+18722405834",
-    body = body
-  )
-
-  tw_send_message(
-    to = Sys.getenv("J_PN"),
-    from = "+18722405834",
-    body = body
-  )
-
-  tw_send_message(
-    to = Sys.getenv("C_PN"),
-    from = "+18722405834",
-    body = body
-  )
+  # Send via discord
+  conn_obj <-
+    create_discord_connection(webhook = 'https://discord.com/api/webhooks/1134185904282550283/qQjKc9PC8R1fQFxOVShhwK9kqAlUW-v3d1h3yBlQt54BteUcLyX7w3U4qfxZHys5zORx',
+                              username = 'Gravekimjani Daily',
+                              set_default = TRUE)
   
-  tw_send_message(
-    to = Sys.getenv("T_PN"),
-    from = "+18722405834",
-    body = body
-  )
+  send_webhook_message(body)
   
-  tw_send_message(
-    to = Sys.getenv("D_PN"),
-    from = "+18722405834",
-    body = body
-  )
+  # Send via Twilio
+  # tw_send_message(
+  #   to = Sys.getenv("A_PN"),
+  #   from = "+18722405834",
+  #   body = body
+  # )
+  # 
+  # tw_send_message(
+  #   to = Sys.getenv("J_PN"),
+  #   from = "+18722405834",
+  #   body = body
+  # )
+  # 
+  # tw_send_message(
+  #   to = Sys.getenv("C_PN"),
+  #   from = "+18722405834",
+  #   body = body
+  # )
+  # 
+  # tw_send_message(
+  #   to = Sys.getenv("T_PN"),
+  #   from = "+18722405834",
+  #   body = body
+  # )
+  
+  # Code to send email
+  # gm_auth_configure(path = Sys.getenv("GMAILR_APP"))
+  # gm_auth(email = TRUE, cache = Sys.getenv("GMAILR_CACHE"))
+  # 
+  # addresses <-
+  #   c(Sys.getenv("A_E"),
+  #     Sys.getenv("J_E"),
+  #     Sys.getenv("N_E"),
+  #     Sys.getenv("C_E"),
+  #     Sys.getenv("T_E"))
+  # 
+  # safe_send <- function(address) {
+  #   email <-
+  #     gm_mime() %>%
+  #     gm_to(address) %>%
+  #     gm_from("gravkimjani@gmail.com") %>%
+  #     gm_subject(paste("Optimal leverage for tomorrow:", opt_k)) %>%
+  #     gm_text_body(body)
+  #   
+  #   safely(gm_send_message)(email)
+  # }
+  # 
+  # map(addresses, safe_send)
 }
 
 if (sys.nframe() == 0) {
