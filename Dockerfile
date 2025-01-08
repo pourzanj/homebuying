@@ -13,5 +13,5 @@ RUN mkdir -p /homebuying
 
 WORKDIR /homebuying
 COPY . /homebuying
-#RUN Rscript -e "renv::restore()"
-#RUN Rscript -e "cmdstanr::install_cmdstan()"
+RUN Rscript -e "renv::restore()"
+RUN Rscript -e "cmdstanr::install_cmdstan()"
