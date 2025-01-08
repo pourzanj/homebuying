@@ -10,7 +10,7 @@ library(posterior)
 library(discordr)
 
 # Define Constants
-kStanModelFile <- "homebuying/stan/sv.stan"
+kStanModelFile <- "stan/sv.stan"
 kNumTrainMonths <- 6
 kNumTrainDays <- 126
 
