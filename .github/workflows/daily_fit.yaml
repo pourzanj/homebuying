@@ -1,6 +1,6 @@
 name: 'build' 
 on: # rebuild any PRs and main branch changes
-  workflow_dispatch
+  workflow_dispatch: ~
   push:
     branches:
       - main
