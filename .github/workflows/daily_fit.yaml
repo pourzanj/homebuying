@@ -29,4 +29,5 @@ jobs:
           env: |
             RIINGO_TOKEN: ${{ secrets.riingo_token }}
           runCmd: |
+            R -e "renv::restore()"
             Rscript scripts/daily_fit.R
