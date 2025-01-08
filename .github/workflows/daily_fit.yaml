@@ -26,7 +26,7 @@ jobs:
           imageName: ghcr.io/pourzanj/homebuying
           cacheFrom: ghcr.io/pourzanj/homebuying
           push: always
-          env:
+          env: |
             RIINGO_TOKEN: ${{ secrets.riingo_token }}
           runCmd: |
             Rscript scripts/daily_fit.R
