@@ -1,11 +1,9 @@
-name: 'daily fit' 
-on:
+name: 'cache image' 
+on: # rebuild any PRs and main branch changes
+  workflow_dispatch: ~
   push:
     branches:
       - master
-    paths:
-      - 'Dockerfile'
-      - 'renv.lock'
 
 jobs:
   build:
@@ -24,13 +22,7 @@ jobs:
 
       - name: Build and run Dev Container task
         uses: devcontainers/ci@v0.3
-        env:
-          RIINGO_TOKEN: ${{ secrets.riingo_token }}
         with:
+          imageName: ghcr.io/pourzanj/homebuying
           cacheFrom: ghcr.io/pourzanj/homebuying
-          push: never
-          env: |
-            RIINGO_TOKEN
-          runCmd: |
-            R -e "renv::restore()"
-            Rscript scripts/daily_fit.R
+          push: always
