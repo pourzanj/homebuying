@@ -4,6 +4,10 @@ on: # rebuild any PRs and main branch changes
   push:
     branches:
       - master
+    paths:
+      - 'Dockerfile'       # Run workflow when any file in the 'src/' directory changes
+      - 'renv.lock'
+      - 'scripts/daily_fit.R'
 
 jobs:
   build:
