@@ -12,8 +12,6 @@ on: # rebuild any PRs and main branch changes
 jobs:
   daily_fit:
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/pourzanj/homebuying:latest
     steps:
 
       - name: Checkout (GitHub)
@@ -35,6 +33,8 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run job in GHCR container
+          container:
+            image: ghcr.io/pourzanj/homebuying:latest
           env:
             RIINGO_TOKEN: ${{ secrets.riingo_token }}
         steps:
