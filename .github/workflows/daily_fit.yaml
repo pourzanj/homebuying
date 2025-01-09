@@ -22,12 +22,14 @@ jobs:
 
       - name: Build and run Dev Container task
         uses: devcontainers/ci@v0.3
+        env:
+          RIINGO_TOKEN: ${{ secrets.riingo_token }}
         with:
           imageName: ghcr.io/pourzanj/homebuying
           cacheFrom: ghcr.io/pourzanj/homebuying
           push: always
           env: |
-            RIINGO_TOKEN: ${{ secrets.riingo_token }}
+            RIINGO_TOKEN
           runCmd: |
             R -e "renv::restore()"
             Rscript scripts/daily_fit.R
