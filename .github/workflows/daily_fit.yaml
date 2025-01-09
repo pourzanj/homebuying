@@ -33,10 +33,10 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run job in GHCR container
-          container:
-            image: ghcr.io/pourzanj/homebuying:latest
-          env:
-            RIINGO_TOKEN: ${{ secrets.riingo_token }}
+        container:
+          image: ghcr.io/pourzanj/homebuying:latest
+        env:
+          RIINGO_TOKEN: ${{ secrets.riingo_token }}
         steps:
           - name: Run daily fit in container
             run: |
