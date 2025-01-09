@@ -12,11 +12,8 @@ on: # rebuild any PRs and main branch changes
 jobs:
   daily_fit:
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/pourzanj/homebuying:latest
-      env:
-        RIINGO_TOKEN: ${{ secrets.riingo_token }}
     steps:
+
       - name: Checkout (GitHub)
         uses: actions/checkout@v3
 
@@ -34,8 +31,24 @@ jobs:
           registry: ghcr.io
           username: ${{ secrets.GITHUB_ACTOR }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pull Docker container
+        run: docker pull ghcr.io/pourzanj/homebuying:latest
+
+      - name: Run daily fit in Docker container
+        with:
+          RIINGO_TOKEN: ${{ secrets.riingo_token }}
+        run: |
+          docker run --rm \
+            -e RIINGO_TOKEN \
+            ghcr.io/pourzanj/homebuying:latest \
+            /bin/bash -c "R -e 'renv::restore()'; Rscript scripts/daily_fit.R"
+
 
       - name: Run job in GHCR container
+        container:
+          image: ghcr.io/pourzanj/homebuying:latest
+          env:
+            RIINGO_TOKEN: ${{ secrets.riingo_token }}
         run: |
           R -e "renv::restore()"
           Rscript scripts/daily_fit.R
