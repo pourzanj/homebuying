@@ -35,8 +35,10 @@ jobs:
       - name: Run job in GHCR container
         container:
           image: ghcr.io/pourzanj/homebuying:latest
-        env:
-          RIINGO_TOKEN: ${{ secrets.riingo_token }}
-        run: |
-          R -e "renv::restore()"
-          Rscript scripts/daily_fit.R
+          env:
+            RIINGO_TOKEN: ${{ secrets.riingo_token }}
+        steps:
+          - name: Run daily fit in container
+            run: |
+              R -e "renv::restore()"
+              Rscript scripts/daily_fit.R
