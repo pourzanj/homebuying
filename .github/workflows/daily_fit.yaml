@@ -10,7 +10,7 @@ on: # rebuild any PRs and main branch changes
       - master
 
 jobs:
-  build:
+  daily_fit:
     runs-on: ubuntu-latest
     steps:
 
@@ -42,10 +42,8 @@ jobs:
       - name: Run job in GHCR container
         container:
           image: ghcr.io/pourzanj/homebuying
-        steps:
-          - name: Print hello from container
-            env:
-              RIINGO_TOKEN: ${{ secrets.riingo_token }}
-            run: |
-              R -e "renv::restore()"
-              Rscript scripts/daily_fit.R
+          env:
+            RIINGO_TOKEN: ${{ secrets.riingo_token }}
+          run: |
+            R -e "renv::restore()"
+            Rscript scripts/daily_fit.R
