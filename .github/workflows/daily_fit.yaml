@@ -32,16 +32,9 @@ jobs:
           username: ${{ secrets.GITHUB_ACTOR }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Pull and use the image
-      - name: Run container from GHCR.io
-        run: |
-          docker pull ghcr.io/<owner>/<image-name>:<tag>
-          docker run ghcr.io/<owner>/<image-name>:<tag> <command>
-
-      # Alternative: Use `container` to run a job directly in the container
       - name: Run job in GHCR container
         container:
-          image: ghcr.io/pourzanj/homebuying
+          image: ghcr.io/pourzanj/homebuying:latest
           env:
             RIINGO_TOKEN: ${{ secrets.riingo_token }}
           run: |
