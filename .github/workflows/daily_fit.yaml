@@ -1,11 +1,9 @@
 name: 'daily fit' 
-on:
+on: # rebuild any PRs and main branch changes
+  workflow_dispatch: ~
   push:
     branches:
       - master
-    paths:
-      - 'Dockerfile'
-      - 'renv.lock'
 
 jobs:
   build:
