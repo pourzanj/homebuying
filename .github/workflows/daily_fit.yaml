@@ -25,7 +25,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and run Dev Container task
-        uses: devcontainers/ci@v0.3
+        uses: devcontainers/ci
         env:
           RIINGO_TOKEN: ${{ secrets.riingo_token }}
         with:
