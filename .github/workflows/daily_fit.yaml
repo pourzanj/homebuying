@@ -2,7 +2,6 @@ name: 'daily fit'
 on: 
   workflow_dispatch: ~
   schedule:
-    # UTC times for 4:40 PM and 4:50 PM Eastern Time
     - cron: "40 21 * * 1-5"
     - cron: "50 21 * * 1-5"
   push:
@@ -12,10 +11,6 @@ on:
 jobs:
   daily_fit:
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/pourzanj/homebuying:latest
-      env:
-        RIINGO_TOKEN: ${{ secrets.riingo_token }}
     steps:
       - name: Checkout (GitHub)
         uses: actions/checkout@v3
@@ -27,7 +22,14 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Run daily fit
+      - name: Pull Docker Image
+        run: docker pull ghcr.io/pourzanj/homebuying:latest
+
+      - name: Run daily fit in container
+        with:
+          RIINGO_TOKEN: ${{ secrets.riingo_token }}
         run: |
-          R -e "renv::restore()"
-          Rscript scripts/daily_fit.R
+          docker run --rm \
+            -e RIINGO_TOKEN=${{ secrets.riingo_token }} \
+            ghcr.io/pourzanj/homebuying:latest \
+            /bin/bash -c "R -e 'renv::restore()'; Rscript scripts/daily_fit.R"
