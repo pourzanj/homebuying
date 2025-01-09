@@ -1,6 +1,10 @@
 name: 'daily fit' 
 on: # rebuild any PRs and main branch changes
   workflow_dispatch: ~
+  schedule:
+    # UTC times for 4:40 PM and 4:50 PM Eastern Time
+    - cron: "40 21 * * 1-5"
+    - cron: "50 21 * * 1-5"
   push:
     branches:
       - master
