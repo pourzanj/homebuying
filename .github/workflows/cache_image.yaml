@@ -21,7 +21,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and run Dev Container task
-        uses: devcontainers/ci@main
+        uses: devcontainers/ci@v0.3
         with:
           imageName: ghcr.io/pourzanj/homebuying
           cacheFrom: ghcr.io/pourzanj/homebuying
