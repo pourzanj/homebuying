@@ -1,0 +1,11 @@
+# Temporary for use with run-as-cron
+* * * * *   /usr/bin/env > /home/username/tmp/cron-env
+
+# Build the Docker image locally at 11:50 EST
+50 11 * * 1-5 cd /Users/hyunsungkim/git/homebuying && docker build -t homebuying:latest . 
+
+# Send daily fit at 12:30 and 12:45 EST using the local Docker image
+30 12 * * 1-5 docker run --rm -e RIINGO_TOKEN=$RIINGO_TOKEN homebuying:latest /bin/bash -c "R -e 'renv::restore()'; Rscript scripts/daily_fit.R"
+45 12 * * 1-5 docker run --rm -e RIINGO_TOKEN=$RIINGO_TOKEN homebuying:latest /bin/bash -c "R -e 'renv::restore()'; Rscript scripts/daily_fit.R"
+
+RIINGO_TOKEN=KEY
