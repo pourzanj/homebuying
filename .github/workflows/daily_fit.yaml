@@ -33,3 +33,4 @@ jobs:
             -e RIINGO_TOKEN=${{ secrets.riingo_token }} \
             ghcr.io/pourzanj/homebuying:latest \
             /bin/bash -c "R -e 'renv::restore()'; Rscript scripts/daily_fit.R"
+
