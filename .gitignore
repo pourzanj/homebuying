@@ -7,3 +7,8 @@ stan/*
 !stan/*.*
 .secret
 .env
+
+# Local execution files
+.vscode/
+cron.log
+run_cron.sh
