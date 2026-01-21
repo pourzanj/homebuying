@@ -18,6 +18,10 @@ kNumCalendarTrainDays <- round((kNumTrainDays / 252) * 365) + 100
 
 kTodaysDate <- Sys.Date()
 
+# Capture compute source and execution time for Discord message
+kComputeSource <- Sys.getenv("COMPUTE_SOURCE", unset = "unknown")
+kTimestamp <- format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z")
+
 kNumStanSamples <- 5e3
 
 kLeverageLevels <- c(0.0, 0.5, 1.0, 2.0, 3.0)
@@ -38,7 +42,8 @@ main <- function() {
   # Get previous days
   spy <-
     tq_get(c("SPY"),
-           get = "tiingo",
+           #get = "tiingo",  # used with RIINGO_TOKEN environment variable if available
+           get = "stock.prices",
            from = kTodaysDate - kNumCalendarTrainDays,
            to = kTodaysDate) %>%
     arrange(date) %>%
@@ -106,11 +111,17 @@ main <- function() {
   ##############################
   
   body <-
-    paste("Return today:", round(tail(spy$pct_return, 1), 2),
-          "\n",
-          "Optimal leverage for tomorrow:", opt_k,
-          "\n",
-          "Expected annualized return:", round(max_expec_ann_returns, 2))
+    paste0("📊 Daily Leverage Update - ", format(kTodaysDate, "%Y-%m-%d"),
+           "\n",
+           "Return today: ", round(tail(spy$pct_return, 1), 2), "%",
+           "\n",
+           "Optimal leverage for tomorrow: ", opt_k, "x",
+           "\n",
+           "Expected annualized return: ", round(max_expec_ann_returns, 2), "%",
+           "\n\n",
+           "🖥️ Source: ", kComputeSource,
+           "\n",
+           "⏰ Time: ", kTimestamp)
 
   # Send via discord
   conn_obj <-
