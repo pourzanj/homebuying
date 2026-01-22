@@ -30,6 +30,9 @@ WRAPPER_SCRIPT="$SCRIPT_DIR/run_cron.sh"
 cat > "$WRAPPER_SCRIPT" << EOF
 #!/bin/bash
 # Wrapper script for cron execution
+# Set PATH so cron can find docker and other commands
+export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:\$PATH"
+
 cd "$SCRIPT_DIR"
 exec "$RUN_SCRIPT" >> "$SCRIPT_DIR/cron.log" 2>&1
 EOF
