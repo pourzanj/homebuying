@@ -28,8 +28,10 @@ jobs:
       - name: Run daily fit in container
         env:
           RIINGO_TOKEN: ${{ secrets.riingo_token }}
+          COMPUTE_SOURCE: github
         run: |
           docker run --rm \
             -e RIINGO_TOKEN=${{ secrets.riingo_token }} \
+            -e COMPUTE_SOURCE=github \
             ghcr.io/pourzanj/homebuying:latest \
-            /bin/bash -c "R -e 'renv::restore()'; Rscript scripts/daily_fit.R"
+            /bin/bash -c "export LD_LIBRARY_PATH=/root/.cmdstan/cmdstan-2.38.0/stan/lib/stan_math/lib/tbb:\$LD_LIBRARY_PATH; R -e 'renv::restore()'; Rscript scripts/daily_fit.R"
