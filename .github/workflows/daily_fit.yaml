@@ -1,9 +1,6 @@
 name: 'daily fit'
-on: 
+on:
   workflow_dispatch: ~
-  schedule:
-    - cron: "40 20 * * 1-5"
-    - cron: "50 20 * * 1-5"
   push:
     branches:
       - master
