@@ -11,4 +11,5 @@ stan/*
 # Local execution files
 .vscode/
 cron.log
+cron-health.log
 run_cron.sh

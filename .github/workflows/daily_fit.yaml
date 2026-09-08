@@ -31,4 +31,4 @@ jobs:
             -e RIINGO_TOKEN=${{ secrets.riingo_token }} \
             -e COMPUTE_SOURCE=github \
             ghcr.io/pourzanj/homebuying:latest \
-            /bin/bash -c "export LD_LIBRARY_PATH=/root/.cmdstan/cmdstan-2.38.0/stan/lib/stan_math/lib/tbb:\$LD_LIBRARY_PATH; R -e 'renv::restore()'; Rscript scripts/daily_fit.R"
+            /bin/bash -euo pipefail -c 'tbb_lib=$(find /root/.cmdstan -path "*/stan/lib/stan_math/lib/tbb/libtbb.so.2" -print | sort -V | tail -n 1); if [ -z "$tbb_lib" ]; then echo "Could not find CmdStan TBB library under /root/.cmdstan" >&2; exit 1; fi; tbb_dir=$(dirname "$tbb_lib"); export LD_LIBRARY_PATH="$tbb_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"; R -e "renv::restore()"; Rscript scripts/daily_fit.R'
